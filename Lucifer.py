@@ -55,7 +55,7 @@ PLANS = {
 user_orders = {}
 deposit_requests = {}
 
-# ==================== تابع هوشمند ساخت کاربر پاسارگاد ===================
+# ==================== تابع ساخت کاربر و دریافت لینک اشتراک ====================
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     requests.packages.urllib3.disable_warnings()
@@ -113,15 +113,28 @@ def create_panel_client(username, volume_gb, days):
             user_res = session.post(url, json=payload, headers=headers, timeout=12, verify=False)
             if user_res.status_code in [200, 201]:
                 user_data = user_res.json()
-                sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
+                
+                # استخراج لینک ساب یا ساخت استاندارد آن
+                sub_url = (
+                    user_data.get("subscription_url") or 
+                    user_data.get("sub_url") or 
+                    f"{PANEL_URL}/sub/{username}"
+                )
+                if isinstance(sub_url, dict):
+                    sub_url = sub_url.get("url") or f"{PANEL_URL}/sub/{username}"
+                    
                 return True, sub_url
             elif user_res.status_code != 405:
                 return False, f"پاسخ پنل ({user_res.status_code}): {user_res.text}"
         except Exception:
             continue
 
-    return False, "خطای 405: هیچ‌کدام از مسیرهای ساخت کاربر در پنل پاسخگو نبودند."
-    
+    return False, "خطای 405: مسیر ساخت کاربر پیدا نشد."
+    import telebot
+from telebot import types
+from config_panel import *
+
+bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==================== کیبوردها ====================
 def main_keyboard():
@@ -246,7 +259,7 @@ def free_test_handler(message):
             f"🎁 **تست رایگان شما با موفقیت ساخته شد!**\n\n"
             f"⏰ مدت اعتبار: ۱ روز\n"
             f"📦 حجم: ۲۵ مگابایت\n\n"
-            f"🔑 لینک کانکشن:\n`{result}`"
+            f"🔑 لینک اشتراک (ساب):\n`{result}`"
         )
         bot.send_message(message.chat.id, test_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
     else:
@@ -392,7 +405,7 @@ def pay_via_wallet(call):
         user_services_db[user_id].append({"username": order["username"], "sub_url": result, "type": plan["name"]})
         save_json(USER_SERVICES_FILE, user_services_db)
         
-        bot.send_message(user_id, f"🎉 خرید موفق با کیف پول!\n\n🔑 لینک کانکشن:\n`{result}`", reply_markup=main_keyboard(), parse_mode="Markdown")
+        bot.send_message(user_id, f"🎉 خرید موفق با کیف پول!\n\n🔑 لینک اشتراک (ساب):\n`{result}`", reply_markup=main_keyboard(), parse_mode="Markdown")
     else:
         user_wallets[user_id] += price
         save_json(WALLETS_FILE, user_wallets)
@@ -462,7 +475,7 @@ def approve_order(call):
         user_services_db[user_id].append({"username": order_info["username"], "sub_url": result, "type": order_info["plan"]["name"]})
         save_json(USER_SERVICES_FILE, user_services_db)
 
-        user_msg = f"🎉 پرداخت شما تایید شد!\n\n🔑 لینک کانکشن شما:\n`{result}`"
+        user_msg = f"🎉 پرداخت شما تایید شد!\n\n🔑 لینک اشتراک (ساب) شما:\n`{result}`"
         bot.send_message(user_id, user_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
         bot.edit_message_caption(call.message.caption + f"\n\n✅ تایید شد و اکانت ساخته شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
     else:
@@ -480,4 +493,4 @@ def reject_order(call):
 if __name__ == "__main__":
     print("Bot is running...")
     bot.infinity_polling()
-        
+                     
