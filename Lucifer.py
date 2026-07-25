@@ -75,6 +75,8 @@ def generate_qr_code(text):
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json"}
+    
+    token = None
     try:
         login_res = session.post(f"{PANEL_URL}/api/admin/token", data={"username": PANEL_USERNAME, "password": PANEL_PASSWORD}, timeout=12, verify=False)
         if login_res.status_code == 200:
@@ -87,6 +89,7 @@ def create_panel_client(username, volume_gb, days):
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
 
     endpoints = [
+        f"{PANEL_URL}/api/users",
         f"{PANEL_URL}/api/user",
         f"{PANEL_URL}/panel/api/inbounds/addClient"
     ]
@@ -122,7 +125,7 @@ def create_panel_client(username, volume_gb, days):
         except Exception:
             continue
             
-    return False, "ارتباط با پنل برقرار شد اما مسیر ساخت کاربر یافت نشد یا پنل پاسخ نداد."
+    return False, "مسیر ساخت کاربر در پنل پیدا نشد (Not Found)."
 
 def main_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -395,4 +398,3 @@ if __name__ == "__main__":
     import threading
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
     bot.infinity_polling()
-    
