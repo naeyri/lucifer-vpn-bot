@@ -86,52 +86,43 @@ def create_panel_client(username, volume_gb, days):
     total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
 
-    pasarguad_payload = {
-        "username": username,
-        "data_limit": total_bytes,
-        "expire": expire_timestamp,
-        "status": "active",
-        "proxies": {"vless": {}},
-        "inbounds": {}
-    }
-
-    try:
-        user_res = session.post(f"{PANEL_URL}/api/user", json=pasarguad_payload, headers=headers, timeout=12, verify=False)
-        if user_res.status_code in [200, 201]:
-            user_data = user_res.json()
-            sub_url = user_data.get("subscription_url", f"{PANEL_URL}/sub/{username}")
-            return True, sub_url
-    except Exception:
-        pass
-
-    try:
-        inbound_id = 1
-        inbounds_res = session.get(f"{PANEL_URL}/panel/api/inbounds/list", headers=headers, timeout=12, verify=False)
-        if inbounds_res.status_code == 200:
-            objs = inbounds_res.json().get("obj", [])
-            if objs:
-                inbound_id = objs[0]["id"]
-
-        client_payload = {
-            "id": inbound_id,
-            "settings": json.dumps({
-                "clients": [{
-                    "id": str(uuid.uuid4()),
-                    "email": username,
-                    "totalGB": total_bytes,
-                    "expiryTime": int(days * 24 * 60 * 60 * 1000),
-                    "enable": True
-                }]
-            })
-        }
-        add_res = session.post(f"{PANEL_URL}/panel/api/inbounds/addClient", json=client_payload, headers=headers, timeout=12, verify=False)
-        res_json = add_res.json()
-        if res_json.get("success"):
-            return True, f"{PANEL_URL}/sub/{username}"
-        else:
-            return False, f"پاسخ پنل: {res_json.get('msg', add_res.text)}"
-    except Exception as e:
-        return False, f"خطا: {str(e)}"
+    endpoints = [
+        f"{PANEL_URL}/api/user",
+        f"{PANEL_URL}/panel/api/inbounds/addClient"
+    ]
+    
+    for url in endpoints:
+        try:
+            if "addClient" in url:
+                payload = {
+                    "id": 1,
+                    "settings": json.dumps({
+                        "clients": [{
+                            "id": str(uuid.uuid4()),
+                            "email": username,
+                            "totalGB": total_bytes,
+                            "expiryTime": int(days * 24 * 60 * 60 * 1000),
+                            "enable": True
+                        }]
+                    })
+                }
+            else:
+                payload = {
+                    "username": username,
+                    "data_limit": total_bytes,
+                    "expire": expire_timestamp,
+                    "status": "active",
+                    "proxies": {"vless": {}},
+                    "inbounds": {}
+                }
+            
+            res = session.post(url, json=payload, headers=headers, timeout=12, verify=False)
+            if res.status_code in [200, 201]:
+                return True, f"{PANEL_URL}/sub/{username}"
+        except Exception:
+            continue
+            
+    return False, "ارتباط با پنل برقرار شد اما مسیر ساخت کاربر یافت نشد یا پنل پاسخ نداد."
 
 def main_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -385,7 +376,7 @@ def approve_order(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("reject_"))
 def reject_order(call):
-    if call.from_user.id not in ADMIN_IDs:
+    if call.from_user.id not in ADMIN_IDS:
         return
     user_id = int(call.data.replace("reject_", ""))
     bot.send_message(user_id, "❌ پرداخت رد شد.", reply_markup=main_keyboard(user_id))
@@ -404,3 +395,4 @@ if __name__ == "__main__":
     import threading
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
     bot.infinity_polling()
+    
