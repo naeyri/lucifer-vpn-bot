@@ -1,14 +1,10 @@
-import telebot
-from telebot import types
 import requests
 import json
 import os
 import time
 
 # ==================== تنظیمات عمومی ====================
-BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"  # توکن ربات از BotFather
-bot = telebot.TeleBot(BOT_TOKEN)
-
+BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"
 ADMIN_IDS = [8738097569, 7384095755]
 CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
@@ -113,15 +109,28 @@ def create_panel_client(username, volume_gb, days):
             timeout=12, 
             verify=False
         )
+        if user_res.status_code == 405:
+            user_res = session.post(
+                f"{PANEL_URL}/api/users/", 
+                json=payload, 
+                headers=headers, 
+                timeout=12, 
+                verify=False
+            )
+
         if user_res.status_code in [200, 201]:
             user_data = user_res.json()
             sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
             return True, sub_url
         else:
-            return False, f"پاسخ پنل: {user_res.text}"
+            return False, f"پاسخ پنل: {user_res.status_code} - {user_res.text}"
     except Exception as e:
         return False, f"خطا: {str(e)}"
-    
+        import telebot
+from telebot import types
+from config_panel import *
+
+bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==================== کیبوردها ====================
 def main_keyboard():
@@ -464,18 +473,20 @@ def approve_order(call):
 
         user_msg = f"🎉 پرداخت شما تایید شد!\n\n🔑 لینک کانکشن شما:\n`{result}`"
         bot.send_message(user_id, user_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
-        bot.edit_message_caption(call.message.caption + f"\n\n✅ تایید شد.\nلینک: {result}", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.edit_message_caption(call.message.caption + f"\n\n✅ تایید شد و اکانت ساخته شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
     else:
-        bot.send_message(call.message.chat.id, f"❌ نتیجه ساخت اکانت:\n{result}")
+        bot.send_message(call.message.chat.id, f"❌ خطا در ساخت اکانت هنگام تایید:\n{result}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("reject_"))
 def reject_order(call):
     if call.from_user.id not in ADMIN_IDS:
         return
     user_id = int(call.data.replace("reject_", ""))
-    bot.send_message(user_id, "❌ پرداخت شما تایید نشد.", reply_markup=main_keyboard())
+    bot.answer_callback_query(call.id, "سفارش رد شد.")
+    bot.send_message(user_id, "❌ رسید پرداخت شما توسط ادمین تایید نشد.", reply_markup=main_keyboard())
     bot.edit_message_caption(call.message.caption + "\n\n❌ رد شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-print("🤖 ربات روشن شد...")
-bot.infinity_polling()
-    
+if __name__ == "__main__":
+    print("Bot is running...")
+    bot.infinity_polling()
+        
