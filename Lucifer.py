@@ -55,13 +55,13 @@ PLANS = {
 user_orders = {}
 deposit_requests = {}
 
-# ==================== تابع هوشمند ساخت کاربر پاسارگاد ====================
+# ==================== تابع هوشمند ساخت کاربر پاسارگاد ===================
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     requests.packages.urllib3.disable_warnings()
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
@@ -101,36 +101,27 @@ def create_panel_client(username, volume_gb, days):
         "status": "active"
     }
 
-    try:
-        user_res = session.post(
-            f"{PANEL_URL}/api/users", 
-            json=payload, 
-            headers=headers, 
-            timeout=12, 
-            verify=False
-        )
-        if user_res.status_code == 405:
-            user_res = session.post(
-                f"{PANEL_URL}/api/users/", 
-                json=payload, 
-                headers=headers, 
-                timeout=12, 
-                verify=False
-            )
+    endpoints = [
+        f"{PANEL_URL}/api/user",
+        f"{PANEL_URL}/api/user/",
+        f"{PANEL_URL}/api/users",
+        f"{PANEL_URL}/api/users/"
+    ]
 
-        if user_res.status_code in [200, 201]:
-            user_data = user_res.json()
-            sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
-            return True, sub_url
-        else:
-            return False, f"پاسخ پنل: {user_res.status_code} - {user_res.text}"
-    except Exception as e:
-        return False, f"خطا: {str(e)}"
-        import telebot
-from telebot import types
-from config_panel import *
+    for url in endpoints:
+        try:
+            user_res = session.post(url, json=payload, headers=headers, timeout=12, verify=False)
+            if user_res.status_code in [200, 201]:
+                user_data = user_res.json()
+                sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
+                return True, sub_url
+            elif user_res.status_code != 405:
+                return False, f"پاسخ پنل ({user_res.status_code}): {user_res.text}"
+        except Exception:
+            continue
 
-bot = telebot.TeleBot(BOT_TOKEN)
+    return False, "خطای 405: هیچ‌کدام از مسیرهای ساخت کاربر در پنل پاسخگو نبودند."
+    
 
 # ==================== کیبوردها ====================
 def main_keyboard():
