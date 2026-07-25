@@ -5,6 +5,8 @@ import json
 import time
 import uuid
 import os
+import io
+import qrcode
 from flask import Flask
 
 # ==================== تنظیمات عمومی ====================
@@ -14,28 +16,41 @@ bot = telebot.TeleBot(BOT_TOKEN)
 ADMIN_IDS = [8738097569, 7384095755]
 CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
+REFERRAL_BONUS = 5000  # مبلغ هدیه زیرمجموعه‌گیری به تومان
 
-# ==================== مدیریت دائمی کیف پول ====================
+# ==================== مدیریت فایل‌ها (کیف پول، تست‌ها، تخفیف‌ها) ====================
 WALLET_FILE = "wallets.json"
+FREE_TEST_FILE = "free_tests.json"
+COUPONS_FILE = "coupons.json"
 
-def load_wallets():
-    if os.path.exists(WALLET_FILE):
+def load_json(file_path):
+    if os.path.exists(file_path):
         try:
-            with open(WALLET_FILE, "r", encoding="utf-8") as f:
-                # تبدیل کلیدها به عدد صحیح (چونکه جیسون کلیدها رو استرینگ ذخیره میکنه)
-                return {int(k): v for k, v in json.load(f).items()}
+            with open(file_path, "r", encoding="utf-8") as f:
+                return {int(k) if file_path == WALLET_FILE else k: v for k, v in json.load(f).items()}
         except Exception:
             return {}
     return {}
 
-def save_wallets():
+def save_json(file_path, data):
     try:
-        with open(WALLET_FILE, "w", encoding="utf-8") as f:
-            json.dump(user_wallets, f, ensure_ascii=False, indent=4)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print(f"خطا در ذخیره کیف پول: {e}")
+        print(f"خطا در ذخیره فایل {file_path}: {e}")
 
-user_wallets = load_wallets()
+user_wallets = load_json(WALLET_FILE)
+free_tested_users = load_json(FREE_TEST_FILE)
+
+def load_coupons():
+    if os.path.exists(COUPONS_FILE):
+        try:
+            with open(COUPONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {"LUCIFER": 10000} # کد تخفیف پیش‌فرض
+
 user_orders = {}
 deposit_requests = {}
 
@@ -55,7 +70,18 @@ PLANS = {
     "unlim": {"name": "۳۰ روزه نامحدود", "price_num": 350000, "price": "350,000 تومان", "volume": 0, "days": 30},
 }
 
-# ==================== تابع ساخت کاربر در پنل پاسارگاد ====================
+# ==================== توابع کمکی ====================
+def generate_qr_code(text):
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(text)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    bio = io.BytesIO()
+    bio.name = 'qrcode.png'
+    img.save(bio, 'PNG')
+    bio.seek(0)
+    return bio
+
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     headers = {
@@ -69,8 +95,7 @@ def create_panel_client(username, volume_gb, days):
         login_res = session.post(
             f"{PANEL_URL}/api/admin/token",
             data={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
-            timeout=12,
-            verify=False
+            timeout=12, verify=False
         )
         if login_res.status_code == 200:
             token = login_res.json().get("access_token")
@@ -79,8 +104,7 @@ def create_panel_client(username, volume_gb, days):
             login_res = session.post(
                 f"{PANEL_URL}/api/admin/token",
                 json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
-                timeout=12,
-                verify=False
+                timeout=12, verify=False
             )
             if login_res.status_code == 200:
                 token = login_res.json().get("access_token")
@@ -88,7 +112,7 @@ def create_panel_client(username, volume_gb, days):
     except Exception:
         pass
 
-    total_bytes = volume_gb * 1024 * 1024 * 1024 if volume_gb > 0 else 0
+    total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
 
     pasarguad_payload = {
@@ -141,8 +165,10 @@ def create_panel_client(username, volume_gb, days):
 # ==================== کیبوردها ====================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton("🛒 خرید سرویس"))
-    markup.row(types.KeyboardButton("💼 کیف پول"), types.KeyboardButton("📞 پشتیبانی"))
+    markup.row(types.KeyboardButton("🛒 خرید سرویس"), types.KeyboardButton("🎁 تست رایگان"))
+    markup.row(types.KeyboardButton("💼 کیف پول"), types.KeyboardButton("📊 سرویس‌های من"))
+    markup.row(types.KeyboardButton("👥 زیرمجموعه‌گیری"), types.KeyboardButton("📞 پشتیبانی"))
+    markup.row(types.KeyboardButton("⚙️ راهنمای اتصال"))
     return markup
 
 def plans_keyboard():
@@ -160,6 +186,7 @@ def payment_method_keyboard():
     markup.add(
         types.InlineKeyboardButton("👛 پرداخت از موجودی کیف پول", callback_data="pay_wallet"),
         types.InlineKeyboardButton("💳 کارت به کارت و ارسال رسید", callback_data="pay_card"),
+        types.InlineKeyboardButton("🏷️ استفاده از کد تخفیف", callback_data="apply_coupon"),
         types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_order")
     )
     return markup
@@ -189,9 +216,44 @@ def admin_deposit_keyboard(user_id):
 
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    welcome_text = f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید."
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    # سیستم زیرمجموعه‌گیری
+    if len(args) > 1 and args[1].isdigit():
+        referrer_id = int(args[1])
+        if referrer_id != user_id and referrer_id not in user_wallets and referrer_id in ADMIN_IDS or True:
+            # ذخیره معرفی‌کننده در صورت نیاز یا پاداش هنگام خرید
+            user_orders[user_id] = user_orders.get(user_id, {})
+            user_orders[user_id]["referrer"] = referrer_id
+
+    welcome_text = f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید.\n\nاز منوی زیر می‌توانید سرویس تهیه کنید یا تست رایگان بگیرید."
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
 
+# ---------- تست رایگان ----------
+@bot.message_handler(func=lambda msg: msg.text == "🎁 تست رایگان")
+def free_test_handler(message):
+    user_id = message.from_user.id
+    if user_id in free_tested_users:
+        bot.send_message(message.chat.id, "❌ شما قبلاً از تست رایگان استفاده کرده‌اید و هر کاربر فقط یک بار می‌تواند تست دریافت کند.")
+        return
+
+    bot.send_message(message.chat.id, "⏳ در حال ساخت تست رایگان ۱ ساعته (۲۵ مگابایت)... لطفاً صبر کنید.")
+    
+    test_username = f"test_{user_id}_{int(time.time())}"
+    success, result = create_panel_client(username=test_username, volume_gb=0.024, days=0.04) # حدود ۱ ساعت و ۲۵ مگابایت
+
+    if success:
+        free_tested_users[user_id] = True
+        save_json(FREE_TEST_FILE, free_tested_users)
+        
+        user_msg = f"🎁 **تست رایگان شما با موفقیت ساخته شد!**\n\n⏰ مدت اعتبار: ۱ ساعت\n📦 حجم: ۲۵ مگابایت\n\n🔑 لینک اشتراک:\n`{result}`"
+        qr_photo = generate_qr_code(result)
+        bot.send_photo(message.chat.id, qr_photo, caption=user_msg, parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, f"❌ خطا در ساخت تست رایگان:\n{result}")
+
+# ---------- کیف پول ----------
 @bot.message_handler(func=lambda msg: msg.text == "💼 کیف پول")
 def show_wallet(message):
     user_id = message.from_user.id
@@ -271,7 +333,7 @@ def approve_deposit(call):
 
     amount = dep_info["amount"]
     user_wallets[user_id] = user_wallets.get(user_id, 0) + amount
-    save_wallets()  # ذخیره در فایل
+    save_json(WALLET_FILE, user_wallets)
 
     bot.send_message(user_id, f"🎉 کیف پول شما با موفقیت مبلغ **{amount:,} تومان** شارژ شد!\n💰 موجودی جدید: **{user_wallets[user_id]:,} تومان**", parse_mode="Markdown")
     bot.edit_message_caption(call.message.caption + f"\n\n✅ **شارژ تایید شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
@@ -285,6 +347,67 @@ def reject_deposit(call):
     bot.send_message(user_id, "❌ رسید شارژ کیف پول شما مورد تایید قرار نگرفت.")
     bot.edit_message_caption(call.message.caption + "\n\n❌ **شارژ رد شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
+# ---------- زیرمجموعه‌گیری ----------
+@bot.message_handler(func=lambda msg: msg.text == "👥 زیرمجموعه‌گیری")
+def referral_handler(message):
+    user_id = message.from_user.id
+    bot_username = bot.get_me().username
+    ref_link = f"https://t.me/{bot_username}?start={user_id}"
+    ref_text = (
+        f"👥 **سیستم زیرمجموعه‌گیری و دعوت از دوستان**\n\n"
+        f"با دعوت دوستان خود به ربات، به ازای هر خرید آن‌ها، هدیه نقدی به کیف پول خود دریافت کنید!\n\n"
+        f"🔗 لینک دعوت اختصاصی شما:\n`{ref_link}`\n\n"
+        f"آن را برای دوستانتان بفرستید."
+    )
+    bot.send_message(message.chat.id, ref_text, parse_mode="Markdown")
+
+# ---------- راهنمای اتصال ----------
+@bot.message_handler(func=lambda msg: msg.text == "⚙️ راهنمای اتصال")
+def guide_handler(message):
+    guide_text = (
+        "⚙️ **راهنمای اتصال به سرویس‌ها**\n\n"
+        "📱 **اندروید:**\n"
+        "برنامه [V2Box](https://play.google.com/store/apps/details?id=com.v2box.app) یا MahsaNG را دانلود کنید، لینک اشتراک را کپی کرده و داخل برنامه اضافه کنید.\n\n"
+        "🍏 **آیفون (iOS):**\n"
+        "برنامه [FoXray](https://apps.apple.com/us/app/foxray/id6448898396) یا V2Box را از اپ‌استور دانلود کنید.\n\n"
+        "💻 **ویندوز:**\n"
+        "برنامه v2rayN را دانلود کرده و لینک ساب را ایمپورت کنید."
+    )
+    bot.send_message(message.chat.id, guide_text, parse_mode="Markdown", disable_web_page_preview=True)
+
+# ---------- استعلام سرویس من ----------
+@bot.message_handler(func=lambda msg: msg.text == "📊 سرویس‌های من")
+def my_services_handler(message):
+    bot.send_message(message.chat.id, "📊 برای استعلام وضعیت و حجم مصرفی، لطفاً نام کاربری اشتراک خود را ارسال کنید:")
+    bot.register_next_step_handler(message, process_check_service)
+
+def process_check_service(message):
+    username = message.text.strip()
+    session = requests.Session()
+    try:
+        login_res = session.post(f"{PANEL_URL}/api/admin/token", json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD}, timeout=10, verify=False)
+        if login_res.status_code == 200:
+            token = login_res.json().get("access_token")
+            headers = {"Authorization": f"Bearer {token}"}
+            res = session.get(f"{PANEL_URL}/api/user/{username}", headers=headers, timeout=10, verify=False)
+            if res.status_code == 200:
+                data = res.json()
+                used_gb = data.get("used_bytes", 0) / (1024**3)
+                total_gb = data.get("data_limit", 0) / (1024**3)
+                status = data.get("status", "نامشخص")
+                info_text = (
+                    f"📊 **وضعیت سرویس: `{username}`**\n\n"
+                    f"🟢 وضعیت: {status}\n"
+                    f"📈 مصرف شده: {used_gb:.2f} گیگابایت\n"
+                    f"📦 کل حجم: {total_gb:.2f} گیگابایت"
+                )
+                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+                return
+    except Exception:
+        pass
+    bot.send_message(message.chat.id, "❌ کاربری با این نام در پنل یافت نشد یا خطا در برقراری ارتباط رخ داد.")
+
+# ---------- خرید سرویس و کد تخفیف ----------
 @bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس")
 def show_plans(message):
     bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خودت رو انتخاب کن:", reply_markup=plans_keyboard())
@@ -300,7 +423,7 @@ def select_plan(call):
     if plan_id not in PLANS:
         return
     bot.answer_callback_query(call.id)
-    user_orders[call.from_user.id] = {"plan": PLANS[plan_id]}
+    user_orders[call.from_user.id] = {"plan": PLANS[plan_id], "discount": 0}
 
     msg = bot.edit_message_text(
         f"شما پلن **{PLANS[plan_id]['name']}** را انتخاب کردید.\n\n"
@@ -317,154 +440,33 @@ def process_username(message):
     user_orders[user_id]["username"] = username_input
     selected_plan = user_orders[user_id]["plan"]
     balance = user_wallets.get(user_id, 0)
+    discount = user_orders[user_id].get("discount", 0)
+    final_price = max(0, selected_plan["price_num"] - discount)
 
     invoice_text = (
         f"🧾 **فاکتور سفارش (LUCIFER VPN)**\n\n"
         f"📌 نام کاربری: `{username_input}`\n"
         f"📦 سرویس: **{selected_plan['name']}**\n"
-        f"💰 قیمت: **{selected_plan['price']}**\n\n"
+        f"💰 قیمت اصلی: **{selected_plan['price']}**\n"
+        f"🏷️ تخفیف اعمال شده: **{discount:,} تومان**\n"
+        f"💵 مبلغ قابل پرداخت: **{final_price:,} تومان**\n\n"
         f"💰 موجودی کیف پول شما: **{balance:,} تومان**\n\n"
-        f"لطفاً روش پرداخت را انتخاب کنید:"
+        f"لطفاً روش پرداخت یا اعمال کد تخفیف را انتخاب کنید:"
     )
     bot.send_message(message.chat.id, invoice_text, reply_markup=payment_method_keyboard(), parse_mode="Markdown")
 
-@bot.callback_query_handler(func=lambda call: call.data == "pay_wallet")
-def pay_via_wallet(call):
-    user_id = call.from_user.id
-    order_info = user_orders.get(user_id)
-
-    if not order_info:
-        bot.answer_callback_query(call.id, "سفارش یافت نشد.", show_alert=True)
-        return
-
-    price = order_info["plan"]["price_num"]
-    balance = user_wallets.get(user_id, 0)
-
-    if balance < price:
-        bot.answer_callback_query(call.id, "❌ موجودی کیف پول کافی نیست.", show_alert=True)
-        return
-
-    user_wallets[user_id] -= price
-    save_wallets()  # ذخیره در فایل
-    bot.answer_callback_query(call.id, "در حال ساخت سرویس...")
-
-    bot.edit_message_text("⚡️ مبلغ کسر شد. در حال ساخت کانکشن...", chat_id=call.message.chat.id, message_id=call.message.message_id)
-
-    success, result = create_panel_client(
-        username=order_info["username"],
-        volume_gb=order_info["plan"]["volume"],
-        days=order_info["plan"]["days"]
-    )
-
-    if success:
-        user_msg = f"🎉 **خرید با موفقیت انجام شد!**\n\n🔑 لینک کانکشن شما:\n`{result}`"
-        bot.send_message(user_id, user_msg, parse_mode="Markdown")
-    else:
-        user_wallets[user_id] += price
-        save_wallets()  # ذخیره در فایل در صورت خطا و برگشت پول
-        bot.send_message(user_id, f"❌ خطا در ساخت اکانت. مبلغ بازگردانده شد.\nعلت: {result}")
-
-@bot.callback_query_handler(func=lambda call: call.data == "pay_card")
-def pay_via_card(call):
+@bot.callback_query_handler(func=lambda call: call.data == "apply_coupon")
+def ask_coupon(call):
     bot.answer_callback_query(call.id)
-    user_id = call.from_user.id
-    order_info = user_orders.get(user_id)
+    msg = bot.send_message(call.message.chat.id, "لطفاً کد تخفیف خود را ارسال کنید:")
+    bot.register_next_step_handler(msg, process_coupon)
 
-    card_text = (
-        f"💳 **پرداخت مستقیم**\n\n"
-        f"شماره کارت:\n`{CARD_NUMBER}`\nبه نام: **{CARD_HOLDER}**\n\n"
-        f"مبلغ قابل پرداخت: **{order_info['plan']['price']}**\n\n"
-        f"📸 لطفاً تصویر رسید واریز را ارسال کنید."
-    )
-    msg = bot.edit_message_text(card_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-    bot.register_next_step_handler(msg, process_receipt)
-
-def process_receipt(message):
+def process_coupon(message):
     user_id = message.from_user.id
-    if not message.photo:
-        msg = bot.send_message(message.chat.id, "❌ لطفاً فقط عکس رسید را ارسال کنید.")
-        bot.register_next_step_handler(msg, process_receipt)
-        return
-
-    order_info = user_orders.get(user_id)
-    photo_id = message.photo[-1].file_id
-    bot.send_message(message.chat.id, "✅ رسید ارسال شد. پس از تایید ادمین، سرویس فعال می‌شود.")
-
-    admin_caption = (
-        f"📥 **رسید خرید جدید**\n"
-        f"👤 کاربر: {message.from_user.first_name}\n"
-        f"🆔 آیدی عددی: `{user_id}`\n"
-        f"📦 سرویس: {order_info['plan']['name']}\n"
-        f"🔑 نام کاربری: `{order_info['username']}`"
-    )
-
-    for admin_id in ADMIN_IDS:
-        try:
-            bot.send_photo(admin_id, photo_id, caption=admin_caption, reply_markup=admin_receipt_keyboard(user_id), parse_mode="Markdown")
-        except Exception as e:
-            print(f"خطا در ارسال به ادمین: {e}")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_"))
-def approve_order(call):
-    if call.from_user.id not in ADMIN_IDS:
-        return
-
-    user_id = int(call.data.replace("approve_", ""))
-    order_info = user_orders.get(user_id)
-
-    if not order_info:
-        bot.answer_callback_query(call.id, "اطلاعات سفارش یافت نشد.", show_alert=True)
-        return
-
-    bot.answer_callback_query(call.id, "در حال ساخت اکانت...")
-
-    success, result = create_panel_client(
-        username=order_info["username"],
-        volume_gb=order_info["plan"]["volume"],
-        days=order_info["plan"]["days"]
-    )
-
-    if success:
-        user_msg = f"🎉 پرداخت شما تایید شد!\n\n🔑 لینک کانکشن شما:\n`{result}`"
-        bot.send_message(user_id, user_msg, parse_mode="Markdown")
-        bot.edit_message_caption(call.message.caption + f"\n\n✅ **تایید شد.**\nلینک: `{result}`", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-    else:
-        bot.send_message(call.message.chat.id, f"❌ نتیجه ساخت اکانت:\n{result}")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("reject_"))
-def reject_order(call):
-    if call.from_user.id not in ADMIN_IDS:
-        return
-    user_id = int(call.data.replace("reject_", ""))
-    bot.send_message(user_id, "❌ پرداخت شما تایید نشد.")
-    bot.edit_message_caption(call.message.caption + "\n\n❌ **رد شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id)
-
-@bot.message_handler(func=lambda msg: msg.text == "📞 پشتیبانی")
-def support_handler(message):
-    support_text = (
-        "🎧 **بخش پشتیبانی ربات لوسیفر**\n\n"
-        "برای پاسخگویی به سوالات، مشاوره یا رفع مشکلات با آیدی‌های زیر در تماس باشید:\n\n"
-        "👤 پشتیبانی اول: @Lucifer_ffx\n"
-        "👤 پشتیبانی دوم: @naeyri1"
-    )
-    bot.send_message(message.chat.id, support_text, parse_mode="Markdown")
-
-# ==================== وب‌سرور فیک برای رندر ====================
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive and running!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-if __name__ == "__main__":
-    import threading
-    t = threading.Thread(target=run_web)
-    t.start()
+    code = message.text.strip()
+    coupons = load_coupons()
     
-    print("🤖 ربات روشن شد...")
-    bot.infinity_polling()
-    
+    if code in coupons:
+        discount_amount = coupons[code]
+        user_orders[user_id]["discount"] = discount_amount
+        bot.send_message(message.chat.id, f"✅ کد تخفیف با موفقیت اعمال شد! مقدار تخفیف: {discoun
