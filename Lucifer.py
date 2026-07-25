@@ -4,6 +4,8 @@ import requests
 import json
 import time
 import uuid
+import os
+from flask import Flask
 
 # ==================== تنظیمات عمومی ====================
 BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"
@@ -36,7 +38,6 @@ deposit_requests = {}
 # ==================== تابع ساخت کاربر در پنل پاسارگاد ====================
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Accept": "application/json",
@@ -171,7 +172,6 @@ def start_handler(message):
     welcome_text = f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید."
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
 
-# --- بخش کیف پول ---
 @bot.message_handler(func=lambda msg: msg.text == "💼 کیف پول")
 def show_wallet(message):
     user_id = message.from_user.id
@@ -264,7 +264,6 @@ def reject_deposit(call):
     bot.send_message(user_id, "❌ رسید شارژ کیف پول شما مورد تایید قرار نگرفت.")
     bot.edit_message_caption(call.message.caption + "\n\n❌ **شارژ رد شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-# --- بخش خرید سرویس ---
 @bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس")
 def show_plans(message):
     bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خودت رو انتخاب کن:", reply_markup=plans_keyboard())
@@ -417,7 +416,6 @@ def reject_order(call):
     bot.send_message(user_id, "❌ پرداخت شما تایید نشد.")
     bot.edit_message_caption(call.message.caption + "\n\n❌ **رد شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-# --- بخش پشتیبانی ---
 @bot.message_handler(func=lambda msg: msg.text == "📞 پشتیبانی")
 def support_handler(message):
     support_text = (
@@ -428,6 +426,22 @@ def support_handler(message):
     )
     bot.send_message(message.chat.id, support_text, parse_mode="Markdown")
 
-print("🤖 ربات روشن شد...")
-bot.infinity_polling()
+# ==================== وب‌سرور فیک برای رندر ====================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+if __name__ == "__main__":
+    import threading
+    t = threading.Thread(target=run_web)
+    t.start()
     
+    print("🤖 ربات روشن شد...")
+    bot.infinity_polling()
+                
