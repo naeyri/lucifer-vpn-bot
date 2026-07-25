@@ -89,8 +89,8 @@ def create_panel_client(username, volume_gb, days):
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
 
     endpoints = [
-        f"{PANEL_URL}/api/user",
         f"{PANEL_URL}/api/users",
+        f"{PANEL_URL}/api/user",
         f"{PANEL_URL}/panel/api/inbounds/addClient"
     ]
     
@@ -125,7 +125,7 @@ def create_panel_client(username, volume_gb, days):
         except Exception:
             continue
             
-    return False, "خطا در ارتباط با پنل یا یافت نشدن مسیر ساخت کاربر."
+    return False, "مسیر ساخت کاربر در پنل پیدا نشد (Not Found)."
 
 def main_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
