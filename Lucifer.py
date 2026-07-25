@@ -471,5 +471,7 @@ def process_receipt(message):
         msg = bot.send_message(message.chat.id, "❌ فقط عکس بفرستید.")
         bot.register_next_step_handler(msg, process_receipt)
         return
-    order = user_orders.get(user_id)
     bot.send_message(message.chat.id, "✅ رسید ارسال شد.",
+                    
+                    reply_markup=main_keyboard(user_id))
+    
