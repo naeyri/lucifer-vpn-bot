@@ -70,80 +70,59 @@ def create_panel_client(username, volume_gb, days):
         "Content-Type": "application/json"
     }
 
-    token = None
     try:
         login_res = session.post(
             f"{PANEL_URL}/api/admin/token",
-            data={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
+            json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
             timeout=12,
             verify=False
         )
-        if login_res.status_code == 200:
-            token = login_res.json().get("access_token")
-            headers["Authorization"] = f"Bearer {token}"
-        else:
+        if login_res.status_code != 200:
             login_res = session.post(
                 f"{PANEL_URL}/api/admin/token",
-                json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
+                data={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
                 timeout=12,
                 verify=False
             )
-            if login_res.status_code == 200:
-                token = login_res.json().get("access_token")
+            
+        if login_res.status_code == 200:
+            token_data = login_res.json()
+            token = token_data.get("access_token") or token_data.get("token")
+            if token:
                 headers["Authorization"] = f"Bearer {token}"
-    except Exception:
-        pass
+        else:
+            return False, f"خطای ورود به پنل: {login_res.status_code}"
+    except Exception as e:
+        return False, f"خطای اتصال: {str(e)}"
 
     total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
     expire_timestamp = int(time.time()) + int(days * 86400) if days > 0 else 0
 
-    pasarguad_payload = {
+    payload = {
         "username": username,
         "data_limit": total_bytes,
         "expire": expire_timestamp,
-        "status": "active",
-        "proxies": {"vless": {}},
-        "inbounds": {}
+        "status": "active"
     }
 
     try:
-        user_res = session.post(f"{PANEL_URL}/api/user", json=pasarguad_payload, headers=headers, timeout=12, verify=False)
+        user_res = session.post(
+            f"{PANEL_URL}/api/users", 
+            json=payload, 
+            headers=headers, 
+            timeout=12, 
+            verify=False
+        )
         if user_res.status_code in [200, 201]:
             user_data = user_res.json()
-            sub_url = user_data.get("subscription_url", f"{PANEL_URL}/sub/{username}")
+            sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
             return True, sub_url
-    except Exception:
-        pass
-
-    try:
-        inbound_id = 1
-        inbounds_res = session.get(f"{PANEL_URL}/panel/api/inbounds/list", headers=headers, timeout=12, verify=False)
-        if inbounds_res.status_code == 200:
-            objs = inbounds_res.json().get("obj", [])
-            if objs:
-                inbound_id = objs[0]["id"]
-
-        import uuid
-        client_payload = {
-            "id": inbound_id,
-            "settings": json.dumps({
-                "clients": [{
-                    "id": str(uuid.uuid4()),
-                    "email": username,
-                    "totalGB": total_bytes,
-                    "expiryTime": int(days * 24 * 60 * 60 * 1000),
-                    "enable": True
-                }]
-            })
-        }
-        add_res = session.post(f"{PANEL_URL}/panel/api/inbounds/addClient", json=client_payload, headers=headers, timeout=12, verify=False)
-        res_json = add_res.json()
-        if res_json.get("success"):
-            return True, f"{PANEL_URL}/sub/{username}"
         else:
-            return False, f"پاسخ پنل: {res_json.get('msg', add_res.text)}"
+            return False, f"پاسخ پنل: {user_res.text}"
     except Exception as e:
-        return False, f"خطای ساخت اکانت: {str(e)}"
+        return False, f"خطا: {str(e)}"
+    
+
 # ==================== کیبوردها ====================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
