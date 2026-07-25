@@ -71,19 +71,19 @@ def generate_qr_code(text):
     img.save(bio, 'PNG')
     bio.seek(0)
     return bio
-
-def create_panel_client(username, volume_gb, days):
+    def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json"}
     
-    token = None
     try:
         login_res = session.post(f"{PANEL_URL}/api/admin/token", data={"username": PANEL_USERNAME, "password": PANEL_PASSWORD}, timeout=12, verify=False)
         if login_res.status_code == 200:
             token = login_res.json().get("access_token")
             headers["Authorization"] = f"Bearer {token}"
-    except Exception:
-        pass
+        else:
+            return False, f"خطای ورود به پنل: کد {login_res.status_code}"
+    except Exception as e:
+        return False, f"خطا در اتصال به پنل: {str(e)}"
 
     total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
@@ -91,9 +91,11 @@ def create_panel_client(username, volume_gb, days):
     endpoints = [
         f"{PANEL_URL}/api/users",
         f"{PANEL_URL}/api/user",
+        f"{PANEL_URL}/api/v1/users",
         f"{PANEL_URL}/panel/api/inbounds/addClient"
     ]
     
+    last_error = ""
     for url in endpoints:
         try:
             if "addClient" in url:
@@ -122,12 +124,16 @@ def create_panel_client(username, volume_gb, days):
             res = session.post(url, json=payload, headers=headers, timeout=12, verify=False)
             if res.status_code in [200, 201]:
                 return True, f"{PANEL_URL}/sub/{username}"
-        except Exception:
+            else:
+                last_error = f"URL: {url} | Code: {res.status_code} | Res: {res.text}"
+        except Exception as e:
+            last_error = str(e)
             continue
             
-    return False, "مسیر ساخت کاربر در پنل پیدا نشد (Not Found)."
+    return False, f"خطا: {last_error}"
+    
 
-def main_keyboard(user_id):
+
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(types.KeyboardButton("🛒 خرید سرویس جدید"), types.KeyboardButton("📦 سرویس‌های من"))
     markup.row(types.KeyboardButton("🎁 تست"))
