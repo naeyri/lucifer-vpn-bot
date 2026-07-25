@@ -9,7 +9,7 @@ import io
 import qrcode
 from flask import Flask
 
-BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"
+BOT_TOKEN = "8108904145:AAFQ8dSWS6-2EJFe-Z9pI089MjdeuQqA_U0"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = [8738097569, 7384095755]
