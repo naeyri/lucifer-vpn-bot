@@ -1,4 +1,3 @@
-import telebot
 from telebot import types
 import requests
 import json
@@ -18,16 +17,20 @@ CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
 REFERRAL_BONUS = 5000  # مبلغ هدیه زیرمجموعه‌گیری به تومان
 
-# ==================== مدیریت فایل‌ها (کیف پول، تست‌ها، تخفیف‌ها) ====================
+# ==================== مدیریت فایل‌ها (دیتابیس‌های محلی) ====================
 WALLET_FILE = "wallets.json"
 FREE_TEST_FILE = "free_tests.json"
 COUPONS_FILE = "coupons.json"
+USER_SERVICES_FILE = "user_services.json"
 
-def load_json(file_path):
+def load_json(file_path, is_int_key=False):
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                return {int(k) if file_path == WALLET_FILE else k: v for k, v in json.load(f).items()}
+                data = json.load(f)
+                if is_int_key:
+                    return {int(k): v for k, v in data.items()}
+                return data
         except Exception:
             return {}
     return {}
@@ -39,8 +42,9 @@ def save_json(file_path, data):
     except Exception as e:
         print(f"خطا در ذخیره فایل {file_path}: {e}")
 
-user_wallets = load_json(WALLET_FILE)
-free_tested_users = load_json(FREE_TEST_FILE)
+user_wallets = load_json(WALLET_FILE, is_int_key=True)
+free_tested_users = load_json(FREE_TEST_FILE, is_int_key=True)
+user_services_db = load_json(USER_SERVICES_FILE, is_int_key=True)
 
 def load_coupons():
     if os.path.exists(COUPONS_FILE):
@@ -49,7 +53,9 @@ def load_coupons():
                 return json.load(f)
         except Exception:
             return {}
-    return {"LUCIFER": 10000} # کد تخفیف پیش‌فرض
+    initial_coupons = {"LUCIFER": 10000}
+    save_json(COUPONS_FILE, initial_coupons)
+    return initial_coupons
 
 user_orders = {}
 deposit_requests = {}
@@ -85,12 +91,10 @@ def generate_qr_code(text):
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
-
-    token = None
     try:
         login_res = session.post(
             f"{PANEL_URL}/api/admin/token",
@@ -100,15 +104,6 @@ def create_panel_client(username, volume_gb, days):
         if login_res.status_code == 200:
             token = login_res.json().get("access_token")
             headers["Authorization"] = f"Bearer {token}"
-        else:
-            login_res = session.post(
-                f"{PANEL_URL}/api/admin/token",
-                json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
-                timeout=12, verify=False
-            )
-            if login_res.status_code == 200:
-                token = login_res.json().get("access_token")
-                headers["Authorization"] = f"Bearer {token}"
     except Exception:
         pass
 
@@ -148,7 +143,7 @@ def create_panel_client(username, volume_gb, days):
                     "id": str(uuid.uuid4()),
                     "email": username,
                     "totalGB": total_bytes,
-                    "expiryTime": days * 24 * 60 * 60 * 1000,
+                    "expiryTime": int(days * 24 * 60 * 60 * 1000),
                     "enable": True
                 }]
             })
@@ -160,10 +155,10 @@ def create_panel_client(username, volume_gb, days):
         else:
             return False, f"پاسخ پنل: {res_json.get('msg', add_res.text)}"
     except Exception as e:
-        return False, f"خطای ساخت اکانت: {str(e)}"
+        return False, f"خطا: {str(e)}"
 
-# ==================== کیبورد اصلی (طبق چیدمان درخواستی شما) ====================
-def main_keyboard():
+# ==================== کیبورد اصلی ====================
+def main_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(
         types.KeyboardButton("🛒 خرید سرویس جدید"),
@@ -172,10 +167,18 @@ def main_keyboard():
     markup.row(
         types.KeyboardButton("🎁 تست رایگان")
     )
-    markup.row(
-        types.KeyboardButton("💼 کیف پول"),
-        types.KeyboardButton("🏷️ ثبت کد تخفیف")
-    )
+    
+    if user_id in ADMIN_IDS:
+        markup.row(
+            types.KeyboardButton("💼 کیف پول"),
+            types.KeyboardButton("🏷️ مدیریت کدهای تخفیف")
+        )
+    else:
+        markup.row(
+            types.KeyboardButton("💼 کیف پول"),
+            types.KeyboardButton("🏷️ ثبت کد تخفیف")
+        )
+
     markup.row(
         types.KeyboardButton("👥 زیرمجموعه‌گیری"),
         types.KeyboardButton("👤 حساب کاربری")
@@ -187,11 +190,9 @@ def main_keyboard():
 
 def plans_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=1)
-    buttons = []
     for plan_id, plan_info in PLANS.items():
         text = f"{plan_info['name']} ⟵ {plan_info['price']}"
-        buttons.append(types.InlineKeyboardButton(text=text, callback_data=f"buy_{plan_id}"))
-    markup.add(*buttons)
+        markup.add(types.InlineKeyboardButton(text=text, callback_data=f"buy_{plan_id}"))
     markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_order"))
     return markup
 
@@ -231,83 +232,71 @@ def admin_deposit_keyboard(user_id):
 def start_handler(message):
     user_id = message.from_user.id
     args = message.text.split()
-    
     if len(args) > 1 and args[1].isdigit():
         referrer_id = int(args[1])
         if referrer_id != user_id:
             user_orders[user_id] = user_orders.get(user_id, {})
             user_orders[user_id]["referrer"] = referrer_id
 
-    welcome_text = f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید.\n\nاز منوی زیر می‌توانید سرویس تهیه کنید یا تست رایگان بگیرید."
-    bot.send_message(message.chat.id, welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
+    welcome_text = f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید."
+    bot.send_message(message.chat.id, welcome_text, reply_markup=main_keyboard(user_id), parse_mode="Markdown")
 
-# ---------- تست رایگان ----------
 @bot.message_handler(func=lambda msg: msg.text == "🎁 تست رایگان")
 def free_test_handler(message):
     user_id = message.from_user.id
     if user_id in free_tested_users:
-        bot.send_message(message.chat.id, "❌ شما قبلاً از تست رایگان استفاده کرده‌اید و هر کاربر فقط یک بار می‌تواند تست دریافت کند.")
+        bot.send_message(message.chat.id, "❌ شما قبلاً از تست رایگان استفاده کرده‌اید.", reply_markup=main_keyboard(user_id))
         return
 
-    bot.send_message(message.chat.id, "⏳ در حال ساخت تست رایگان ۱ ساعته (۲۵ مگابایت)... لطفاً صبر کنید.")
-    
+    bot.send_message(message.chat.id, "⏳ در حال ساخت تست رایگان ۱ ساعته (۲۵ مگابایت)...")
     test_username = f"test_{user_id}_{int(time.time())}"
-    success, result = create_panel_client(username=test_username, volume_gb=0.024, days=0.04)
+    success, result = create_panel_client(username=test_username, volume_gb=0.024414, days=1/24)
 
     if success:
         free_tested_users[user_id] = True
         save_json(FREE_TEST_FILE, free_tested_users)
         
-        user_msg = f"🎁 **تست رایگان شما با موفقیت ساخته شد!**\n\n⏰ مدت اعتبار: ۱ ساعت\n📦 حجم: ۲۵ مگابایت\n\n🔑 لینک اشتراک:\n`{result}`"
-        qr_photo = generate_qr_code(result)
-        bot.send_photo(message.chat.id, qr_photo, caption=user_msg, parse_mode="Markdown")
-    else:
-        bot.send_message(message.chat.id, f"❌ خطا در ساخت تست رایگان:\n{result}")
+        if user_id not in user_services_db:
+            user_services_db[user_id] = []
+        user_services_db[user_id].append({"username": test_username, "sub_url": result, "type": "تست رایگان"})
+        save_json(USER_SERVICES_FILE, user_services_db)
 
-# ---------- کیف پول ----------
+        user_msg = f"🎁 **تست رایگان ساخته شد!**\n\n⏰ مدت: ۱ ساعت\n📦 حجم: ۲۵ مگابایت\n\n🔑 لینک:\n`{result}`"
+        bot.send_photo(message.chat.id, generate_qr_code(result), caption=user_msg, reply_markup=main_keyboard(user_id), parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, f"❌ خطا: {result}", reply_markup=main_keyboard(user_id))
+
 @bot.message_handler(func=lambda msg: msg.text == "💼 کیف پول")
 def show_wallet(message):
     user_id = message.from_user.id
     balance = user_wallets.get(user_id, 0)
-    wallet_text = (
-        f"💼 **کیف پول شما**\n\n"
-        f"💰 موجودی فعلی: **{balance:,} تومان**\n\n"
-        f"با شارژ کیف پول می‌توانید تمام خریدهای خود را به‌صورت آنی انجام دهید."
-    )
-    bot.send_message(message.chat.id, wallet_text, reply_markup=wallet_keyboard(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"💼 **کیف پول شما**\n\n💰 موجودی: **{balance:,} تومان**", reply_markup=wallet_keyboard(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == "charge_wallet")
 def start_charge_wallet(call):
     bot.answer_callback_query(call.id)
-    msg = bot.send_message(call.message.chat.id, "لطفاً مبلغ مورد نظر جهت شارژ را به **تومان** وارد کنید:\n(مثلاً: 50000)")
+    msg = bot.send_message(call.message.chat.id, "لطفاً مبلغ شارژ را به **تومان** وارد کنید:")
     bot.register_next_step_handler(msg, process_deposit_amount)
 
 def process_deposit_amount(message):
     try:
         amount = int(message.text.strip())
         if amount < 5000:
-            bot.send_message(message.chat.id, "❌ حداقل مبلغ شارژ ۵,۰۰۰ تومان می‌باشد.")
+            bot.send_message(message.chat.id, "❌ حداقل مبلغ ۵,۰۰۰ تومان است.")
             return
     except ValueError:
-        bot.send_message(message.chat.id, "❌ لطفاً مبلغ را فقط به صورت عدد وارد کنید.")
+        bot.send_message(message.chat.id, "❌ فقط عدد وارد کنید.")
         return
 
     user_id = message.from_user.id
     deposit_requests[user_id] = {"amount": amount}
-
-    charge_text = (
-        f"📌 **درخواست شارژ حساب**\n\n"
-        f"💵 مبلغ: **{amount:,} تومان**\n\n"
-        f"💳 شماره کارت جهت واریز:\n`{CARD_NUMBER}`\nبه نام: **{CARD_HOLDER}**\n\n"
-        f"📸 لطفاً پس از واریز، تصویر رسید پرداخت را ارسال کنید."
-    )
-    msg = bot.send_message(message.chat.id, charge_text, parse_mode="Markdown")
+    msg = bot.send_message(message.chat.id, f"💳 شماره کارت:\n`{CARD_NUMBER}`\nبه نام: **{CARD_HOLDER}**\n\n📸 عکس رسید را بفرستید.", parse_mode="Markdown")
     bot.register_next_step_handler(msg, process_deposit_receipt)
 
 def process_deposit_receipt(message):
     user_id = message.from_user.id
     if not message.photo:
-        msg = bot.send_message(message.chat.id, "❌ لطفاً فقط عکس رسید را ارسال کنید.")
+        msg = bot.send_message(message.chat.id, "❌ لطفاً فقط عکس بفرستید.")
         bot.register_next_step_handler(msg, process_deposit_receipt)
         return
 
@@ -316,20 +305,12 @@ def process_deposit_receipt(message):
         return
 
     photo_id = message.photo[-1].file_id
-    bot.send_message(message.chat.id, "✅ رسید شارژ دریافت شد. پس از بررسی ادمین، کیف پول شما شارژ می‌شود.")
-
-    admin_caption = (
-        f"📥 **درخواست شارژ کیف پول**\n"
-        f"👤 کاربر: {message.from_user.first_name}\n"
-        f"🆔 آیدی عددی: `{user_id}`\n"
-        f"💰 مبلغ درخواست: **{dep_info['amount']:,} تومان**"
-    )
-
+    bot.send_message(message.chat.id, "✅ رسید دریافت شد.", reply_markup=main_keyboard(user_id))
     for admin_id in ADMIN_IDS:
         try:
-            bot.send_photo(admin_id, photo_id, caption=admin_caption, reply_markup=admin_deposit_keyboard(user_id), parse_mode="Markdown")
-        except Exception as e:
-            print(f"خطا در ارسال به ادمین: {e}")
+            bot.send_photo(admin_id, photo_id, caption=f"📥 درخواست شارژ\n👤 کاربر: `{user_id}`\n💰 مبلغ: {dep_info['amount']:,} تومان", reply_markup=admin_deposit_keyboard(user_id), parse_mode="Markdown")
+        except Exception:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("depapprove_"))
 def approve_deposit(call):
@@ -337,119 +318,92 @@ def approve_deposit(call):
         return
     user_id = int(call.data.replace("depapprove_", ""))
     dep_info = deposit_requests.get(user_id)
-
     if not dep_info:
-        bot.answer_callback_query(call.id, "اطلاعات درخواست یافت نشد.", show_alert=True)
         return
-
     amount = dep_info["amount"]
     user_wallets[user_id] = user_wallets.get(user_id, 0) + amount
     save_json(WALLET_FILE, user_wallets)
-
-    bot.send_message(user_id, f"🎉 کیف پول شما با موفقیت مبلغ **{amount:,} تومان** شارژ شد!\n💰 موجودی جدید: **{user_wallets[user_id]:,} تومان**", parse_mode="Markdown")
-    bot.edit_message_caption(call.message.caption + f"\n\n✅ **شارژ تایید شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-    bot.answer_callback_query(call.id, "شارژ تایید شد.")
+    bot.send_message(user_id, f"🎉 کیف پول شما {amount:,} تومان شارژ شد!", reply_markup=main_keyboard(user_id))
+    bot.edit_message_caption(call.message.caption + "\n\n✅ تایید شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("depreject_"))
 def reject_deposit(call):
     if call.from_user.id not in ADMIN_IDS:
         return
     user_id = int(call.data.replace("depreject_", ""))
-    bot.send_message(user_id, "❌ رسید شارژ کیف پول شما مورد تایید قرار نگرفت.")
-    bot.edit_message_caption(call.message.caption + "\n\n❌ **شارژ رد شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id)
+    bot.send_message(user_id, "❌ شارژ رد شد.", reply_markup=main_keyboard(user_id))
+    bot.edit_message_caption(call.message.caption + "\n\n❌ رد شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-# ---------- زیرمجموعه‌گیری ----------
-@bot.message_handler(func=lambda msg: msg.text == "👥 زیرمجموعه‌گیری")
-def referral_handler(message):
-    user_id = message.from_user.id
-    bot_username = bot.get_me().username
-    ref_link = f"https://t.me/{bot_username}?start={user_id}"
-    ref_text = (
-        f"👥 **سیستم زیرمجموعه‌گیری و دعوت از دوستان**\n\n"
-        f"با دعوت دوستان خود به ربات، به ازای هر خرید آن‌ها، هدیه نقدی به کیف پول خود دریافت کنید!\n\n"
-        f"🔗 لینک دعوت اختصاصی شما:\n`{ref_link}`"
-    )
-    bot.send_message(message.chat.id, ref_text, parse_mode="Markdown")
-
-# ---------- ثبت کد تخفیف ----------
 @bot.message_handler(func=lambda msg: msg.text == "🏷️ ثبت کد تخفیف")
 def coupon_menu_handler(message):
-    msg = bot.send_message(
-        message.chat.id, 
-        "🏷️ لطفاً کد تخفیف خود را ارسال کنید تا روی خرید بعدی شما اعمال شود:"
-    )
+    msg = bot.send_message(message.chat.id, "🏷️ کد تخفیف خود را بفرستید:")
     bot.register_next_step_handler(msg, process_global_coupon)
 
 def process_global_coupon(message):
     user_id = message.from_user.id
     code = message.text.strip()
     coupons = load_coupons()
-    
     if code in coupons:
-        discount_amount = coupons[code]
+        discount = coupons[code]
         user_orders[user_id] = user_orders.get(user_id, {})
-        user_orders[user_id]["discount"] = discount_amount
-        bot.send_message(
-            message.chat.id, 
-            f"✅ کد تخفیف `{code}` با موفقیت ثبت شد!\nمبلغ **{discount_amount:,} تومان** تخفیف روی خرید بعدی شما اعمال خواهد شد."
-        )
+        user_orders[user_id]["discount"] = discount
+        bot.send_message(message.chat.id, f"✅ کد `{code}` اعمال شد ({discount:,} تومان تخفیف).", reply_markup=main_keyboard(user_id))
     else:
-        bot.send_message(message.chat.id, "❌ کد تخفیف وارد شده نامعتبر یا منقضی شده است.")
+        bot.send_message(message.chat.id, "❌ کد نامعتبر است.", reply_markup=main_keyboard(user_id))
 
-# ---------- حساب کاربری ----------
+@bot.message_handler(func=lambda msg: msg.text == "🏷️ مدیریت کدهای تخفیف" and msg.from_user.id in ADMIN_IDS)
+def admin_manage_coupons(message):
+    coupons = load_coupons()
+    text = "🏷️ کدهای تخفیف:\n"
+    for c, v in coupons.items():
+        text += f"- `{c}`: {v:,} تومان\n"
+    text += "\nثبت جدید به شکل `کد:مبلغ`:"
+    msg = bot.send_message(message.chat.id, text, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_create_coupon)
+
+def process_create_coupon(message):
+    try:
+        parts = message.text.split(":")
+        code, amount = parts[0].strip(), int(parts[1].strip())
+        coupons = load_coupons()
+        coupons[code] = amount
+        save_json(COUPONS_FILE, coupons)
+        bot.send_message(message.chat.id, f"✅ کد `{code}` ثبت شد.", reply_markup=main_keyboard(message.from_user.id))
+    except Exception:
+        bot.send_message(message.chat.id, "❌ فرمت اشتباه است.", reply_markup=main_keyboard(message.from_user.id))
+
+@bot.message_handler(func=lambda msg: msg.text == "👥 زیرمجموعه‌گیری")
+def referral_handler(message):
+    user_id = message.from_user.id
+    ref_link = f"https://t.me/{bot.get_me().username}?start={user_id}"
+    bot.send_message(message.chat.id, f"🔗 لینک دعوت شما:\n`{ref_link}`", reply_markup=main_keyboard(user_id), parse_mode="Markdown")
+
 @bot.message_handler(func=lambda msg: msg.text == "👤 حساب کاربری")
 def account_handler(message):
     user_id = message.from_user.id
     balance = user_wallets.get(user_id, 0)
-    acc_text = (
-        f"👤 **اطلاعات حساب کاربری شما**\n\n"
-        f"🆔 آیدی عددی: `{user_id}`\n"
-        f"💰 موجودی کیف پول: **{balance:,} تومان**\n"
-        f"🎁 وضعیت تست رایگان: {'استفاده شده ❌' if user_id in free_tested_users else 'استفاده نشده ✅'}"
-    )
-    bot.send_message(message.chat.id, acc_text, parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"👤 آیدی: `{user_id}`\n💰 کیف پول: **{balance:,} تومان**", reply_markup=main_keyboard(user_id), parse_mode="Markdown")
 
-# ---------- استعلام سرویس من ----------
 @bot.message_handler(func=lambda msg: msg.text == "📦 سرویس‌های من")
 def my_services_handler(message):
-    bot.send_message(message.chat.id, "📊 برای استعلام وضعیت و حجم مصرفی، لطفاً نام کاربری اشتراک خود را ارسال کنید:")
-    bot.register_next_step_handler(message, process_check_service)
+    user_id = message.from_user.id
+    services = user_services_db.get(user_id, [])
+    if not services:
+        bot.send_message(message.chat.id, "📦 سرویسی یافت نشد.", reply_markup=main_keyboard(user_id))
+        return
+    text = "📦 **سرویس‌های شما:**\n\n"
+    for idx, s in enumerate(services, 1):
+        text += f"{idx}. `{s['username']}` ({s.get('type')})\n🔗 `{s['sub_url']}`\n\n"
+    bot.send_message(message.chat.id, text, reply_markup=main_keyboard(user_id), parse_mode="Markdown")
 
-def process_check_service(message):
-    username = message.text.strip()
-    session = requests.Session()
-    try:
-        login_res = session.post(f"{PANEL_URL}/api/admin/token", json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD}, timeout=10, verify=False)
-        if login_res.status_code == 200:
-            token = login_res.json().get("access_token")
-            headers = {"Authorization": f"Bearer {token}"}
-            res = session.get(f"{PANEL_URL}/api/user/{username}", headers=headers, timeout=10, verify=False)
-            if res.status_code == 200:
-                data = res.json()
-                used_gb = data.get("used_bytes", 0) / (1024**3)
-                total_gb = data.get("data_limit", 0) / (1024**3)
-                status = data.get("status", "نامشخص")
-                info_text = (
-                    f"📊 **وضعیت سرویس: `{username}`**\n\n"
-                    f"🟢 وضعیت: {status}\n"
-                    f"📈 مصرف شده: {used_gb:.2f} گیگابایت\n"
-                    f"📦 کل حجم: {total_gb:.2f} گیگابایت"
-                )
-                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-                return
-    except Exception:
-        pass
-    bot.send_message(message.chat.id, "❌ کاربری با این نام در پنل یافت نشد یا خطا در برقراری ارتباط رخ داد.")
-
-# ---------- خرید سرویس جدید ----------
 @bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس جدید")
 def show_plans(message):
-    bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خودت رو انتخاب کن:", reply_markup=plans_keyboard())
+    bot.send_message(message.chat.id, "پلن مورد نظر را انتخاب کنید:", reply_markup=plans_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == "cancel_order")
 def cancel_order(call):
     bot.answer_callback_query(call.id)
-    bot.edit_message_text("سفارش شما لغو شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
+    bot.edit_message_text("لغو شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
 def select_plan(call):
@@ -458,36 +412,64 @@ def select_plan(call):
         return
     bot.answer_callback_query(call.id)
     user_id = call.from_user.id
-    current_discount = user_orders.get(user_id, {}).get("discount", 0)
-    
-    user_orders[user_id] = {"plan": PLANS[plan_id], "discount": current_discount}
-
-    msg = bot.edit_message_text(
-        f"شما پلن **{PLANS[plan_id]['name']}** را انتخاب کردید.\n\n"
-        f"لطفاً نام کاربری انگلیسی دلخواه برای ساخت کانکشن ارسال کنید:",
-        chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown"
-    )
+    user_orders[user_id] = {"plan": PLANS[plan_id], "discount": user_orders.get(user_id, {}).get("discount", 0)}
+    msg = bot.edit_message_text("نام کاربری انگلیسی را بفرستید:", chat_id=call.message.chat.id, message_id=call.message.message_id)
     bot.register_next_step_handler(msg, process_username)
 
 def process_username(message):
     user_id = message.from_user.id
     if user_id not in user_orders:
         return
-    username_input = message.text.strip().replace(" ", "_")
-    user_orders[user_id]["username"] = username_input
-    selected_plan = user_orders[user_id]["plan"]
-    balance = user_wallets.get(user_id, 0)
+    username = message.text.strip().replace(" ", "_")
+    user_orders[user_id]["username"] = username
+    plan = user_orders[user_id]["plan"]
     discount = user_orders[user_id].get("discount", 0)
-    final_price = max(0, selected_plan["price_num"] - discount)
+    final_price = max(0, plan["price_num"] - discount)
+    bot.send_message(message.chat.id, f"فاکتور:\nمبلغ نهایی: **{final_price:,} تومان**\nروش پرداخت را انتخاب کنید:", reply_markup=payment_method_keyboard(), parse_mode="Markdown")
 
-    invoice_text = (
-        f"🧾 **فاکتور سفارش (LUCIFER VPN)**\n\n"
-        f"📌 نام کاربری: `{username_input}`\n"
-        f"📦 سرویس: **{selected_plan['name']}**\n"
-        f"💰 قیمت اصلی: **{selected_plan['price']}**\n"
-        f"🏷️ تخفیف اعمال شده: **{discount:,} تومان**\n"
-        f"💵 مبلغ قابل پرداخت: **{final_price:,} تومان**\n\n"
-        f"💰 موجودی کیف پول شما: **{balance:,} تومان**\n\n"
-        f"لطفاً روش پرداخت را انتخاب کنید:"
-    )
-    bot.send_message(message.chat.id, 
+@bot.callback_query_handler(func=lambda call: call.data == "pay_wallet")
+def pay_via_wallet(call):
+    user_id = call.from_user.id
+    order = user_orders.get(user_id)
+    if not order:
+        return
+    plan = order["plan"]
+    price = max(0, plan["price_num"] - order.get("discount", 0))
+    balance = user_wallets.get(user_id, 0)
+    if balance < price:
+        bot.answer_callback_query(call.id, "❌ موجودی کافی نیست.", show_alert=True)
+        return
+
+    user_wallets[user_id] -= price
+    save_json(WALLET_FILE, user_wallets)
+    bot.answer_callback_query(call.id, "در حال ساخت...")
+
+    success, result = create_panel_client(order["username"], plan["volume"], plan["days"])
+    if success:
+        if user_id not in user_services_db:
+            user_services_db[user_id] = []
+        user_services_db[user_id].append({"username": order["username"], "sub_url": result, "type": plan["name"]})
+        save_json(USER_SERVICES_FILE, user_services_db)
+        bot.send_photo(user_id, generate_qr_code(result), caption=f"🎉 خرید موفق!\n🔑 لینک:\n`{result}`", reply_markup=main_keyboard(user_id), parse_mode="Markdown")
+    else:
+        user_wallets[user_id] += price
+        save_json(WALLET_FILE, user_wallets)
+        bot.send_message(user_id, f"❌ خطا: {result}", reply_markup=main_keyboard(user_id))
+
+@bot.callback_query_handler(func=lambda call: call.data == "pay_card")
+def pay_via_card(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    order = user_orders.get(user_id)
+    price = max(0, order["plan"]["price_num"] - order.get("discount", 0))
+    msg = bot.edit_message_text(f"💳 کارت:\n`{CARD_NUMBER}`\nمبلغ: {price:,} تومان\n📸 رسید را بفرستید.", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_receipt)
+
+def process_receipt(message):
+    user_id = message.from_user.id
+    if not message.photo:
+        msg = bot.send_message(message.chat.id, "❌ فقط عکس بفرستید.")
+        bot.register_next_step_handler(msg, process_receipt)
+        return
+    order = user_orders.get(user_id)
+    bot.send_message(message.chat.id, "✅ رسید ارسال شد.",
