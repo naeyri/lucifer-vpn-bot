@@ -12,13 +12,14 @@ bot = telebot.TeleBot(BOT_TOKEN)
 ADMIN_IDS = [8738097569, 7384095755]
 CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
+SUPPORT_ID = "@naeyri1"
 
 # ==================== مسیر فایل‌های ذخیره‌سازی ====================
 WALLETS_FILE = "wallets.json"
 FREE_TEST_FILE = "free_tested.json"
 REFERRALS_FILE = "referrals.json"
 
-# ==================== توابع مدیریت دیتابیس محلی (جلوگیری از پاک شدن اطلاعات) ====================
+# ==================== توابع مدیریت دیتابیس محلی ====================
 def load_json(filename):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
@@ -55,7 +56,7 @@ PLANS = {
 user_orders = {}
 deposit_requests = {}
 
-# ==================== تابع هوشمند ساخت کاربر پاسارگاد ====================
+# ==================== تابع ساخت کاربر پاسارگاد ====================
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
     requests.packages.urllib3.disable_warnings()
@@ -221,7 +222,7 @@ def start_handler(message):
 def show_plans(message):
     bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خودت رو انتخاب کن:", reply_markup=plans_keyboard())
 
-# ==================== تست رایگان (۲۵ مگابایت - ۱ ساعته) ====================
+# ==================== تست رایگان ====================
 @bot.message_handler(func=lambda msg: msg.text == "🎁 تست رایگان")
 def free_test_handler(message):
     user_id = message.from_user.id
@@ -232,7 +233,6 @@ def free_test_handler(message):
     bot.send_message(message.chat.id, "⏳ در حال ساخت تست رایگان (۲۵ مگابایت - ۱ ساعته)...")
     test_username = f"test_{user_id}_{int(time.time())}"
     
-    # ۲۵ مگابایت = 0.0244 گیگابایت، مدت اعتبار = 1 روز (حداقل زمان پنل برای تست ۱ ساعته)
     success, result = create_panel_client(username=test_username, volume_gb=0.0244, days=1)
 
     if success:
@@ -340,7 +340,7 @@ def referral_handler(message):
 
 @bot.message_handler(func=lambda msg: msg.text == "📞 پشتیبانی")
 def support_handler(message):
-    bot.send_message(message.chat.id, "📞 برای ارتباط با پشتیبانی به آیدی زیر پیام دهید:\n@Lucifer_ffx", reply_markup=main_keyboard())
+    bot.send_message(message.chat.id, f"📞 برای ارتباط با پشتیبانی به آیدی زیر پیام دهید:\n{SUPPORT_ID}", reply_markup=main_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == "cancel_order")
 def cancel_order(call):
@@ -403,8 +403,7 @@ def pay_via_wallet(call):
     if success:
         success_msg = (
             f"🎉 خرید موفق با کیف پول انجام شد!\n\n"
-            f"👤 نام کاربری: `{order['username']}`\n"
-            f"🔗 آدرس پنل:\n{PANEL_URL}\n\n"
+            f"👤 نام کاربری: `{order['username']}`\n\n"
             f"🔑 لینک اشتراک (ساب):\n`{result}`"
         )
         bot.send_message(user_id, success_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
@@ -475,8 +474,76 @@ def approve_order(call):
     if success:
         user_msg = (
             f"🎉 پرداخت شما توسط ادمین تایید شد!\n\n"
-            f"👤 نام کاربری: `{order_info['username']}`\n"
-            f"🔗 آدرس پنل:\n{PANEL_URL}\n\n"
+            f"👤 نام کاربری: `{order_info['username']}`\n\n"
+            f"🔑 لینک اشتراک (ساب) شما:\n`{result}`"
+        )
+        bot.send_message(user_id, user_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
+        bot.edit_message_caption(call.message.caption + f"\n\n✅ تایید شد و اکانت ساخته شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
+    else:
+        bot.send_message(call.message.chat.id, f"❌ خطا در ساخت اکانت هنگام تایید:\n{result}")
+
+@bot.callback_query_handler(func=lambda call: call.data == "pay_card")
+def pay_via_card(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    order = user_orders.get(user_id)
+    price = order["plan"]["price"]
+    msg = bot.send_message(
+        call.message.chat.id,
+        f"💳 شماره کارت:\n`{CARD_NUMBER}`\nبه نام: **{CARD_HOLDER}**\nمبلغ: {price}\n\n📸 لطفاً تصویر رسید پرداخت را ارسال کنید.",
+        parse_mode="Markdown"
+    )
+    bot.register_next_step_handler(msg, process_receipt)
+
+def process_receipt(message):
+    user_id = message.from_user.id
+    if not message.photo:
+        msg = bot.send_message(message.chat.id, "❌ لطفاً فقط عکس رسید را ارسال کنید.")
+        bot.register_next_step_handler(msg, process_receipt)
+        return
+
+    order_info = user_orders.get(user_id)
+    photo_id = message.photo[-1].file_id
+    bot.send_message(message.chat.id, "✅ رسید ارسال شد. پس از تایید ادمین، سرویس فعال می‌شود.", reply_markup=main_keyboard())
+
+    admin_caption = (
+        f"📥 رسید جدید خرید\n"
+        f"👤 کاربر: {message.from_user.first_name}\n"
+        f"🆔 آیدی عددی: `{user_id}`\n"
+        f"📦 سرویس: {order_info['plan']['name']}\n"
+        f"🔑 نام کاربری: `{order_info['username']}`"
+    )
+
+    for admin_id in ADMIN_IDS:
+        try:
+            bot.send_photo(admin_id, photo_id, caption=admin_caption, reply_markup=admin_receipt_keyboard(user_id), parse_mode="Markdown")
+        except Exception as e:
+            print(f"خطا در ارسال به ادمین: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_"))
+def approve_order(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+
+    user_id = int(call.data.replace("approve_", ""))
+    order_info = user_orders.get(user_id)
+
+    if not order_info:
+        bot.answer_callback_query(call.id, "اطلاعات سفارش یافت نشد.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, "در حال ساخت اکانت...")
+
+    success, result = create_panel_client(
+        username=order_info["username"],
+        volume_gb=order_info["plan"]["volume"],
+        days=order_info["plan"]["days"]
+    )
+
+    if success:
+        user_msg = (
+            f"🎉 پرداخت شما توسط ادمین تایید شد!\n\n"
+            f"👤 نام کاربری: `{order_info['username']}`\n\n"
             f"🔑 لینک اشتراک (ساب) شما:\n`{result}`"
         )
         bot.send_message(user_id, user_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
