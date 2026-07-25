@@ -162,13 +162,27 @@ def create_panel_client(username, volume_gb, days):
     except Exception as e:
         return False, f"خطای ساخت اکانت: {str(e)}"
 
-# ==================== کیبوردها ====================
+# ==================== کیبورد اصلی (طبق چیدمان درخواستی) ====================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton("🛒 خرید سرویس"), types.KeyboardButton("🎁 تست رایگان"))
-    markup.row(types.KeyboardButton("💼 کیف پول"), types.KeyboardButton("📊 سرویس‌های من"))
-    markup.row(types.KeyboardButton("👥 زیرمجموعه‌گیری"), types.KeyboardButton("📞 پشتیبانی"))
-    markup.row(types.KeyboardButton("⚙️ راهنمای اتصال"))
+    markup.row(
+        types.KeyboardButton("🛒 خرید سرویس جدید"),
+        types.KeyboardButton("📦 سرویس‌های من")
+    )
+    markup.row(
+        types.KeyboardButton("🎁 تست رایگان")
+    )
+    markup.row(
+        types.KeyboardButton("💼 کیف پول"),
+        types.KeyboardButton("👤 حساب کاربری")
+    )
+    markup.row(
+        types.KeyboardButton("👥 زیرمجموعه‌گیری"),
+        types.KeyboardButton("🏷️ ثبت کد تخفیف")
+    )
+    markup.row(
+        types.KeyboardButton("📞 پشتیبانی")
+    )
     return markup
 
 def plans_keyboard():
@@ -186,7 +200,6 @@ def payment_method_keyboard():
     markup.add(
         types.InlineKeyboardButton("👛 پرداخت از موجودی کیف پول", callback_data="pay_wallet"),
         types.InlineKeyboardButton("💳 کارت به کارت و ارسال رسید", callback_data="pay_card"),
-        types.InlineKeyboardButton("🏷️ استفاده از کد تخفیف", callback_data="apply_coupon"),
         types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_order")
     )
     return markup
@@ -219,11 +232,9 @@ def start_handler(message):
     user_id = message.from_user.id
     args = message.text.split()
     
-    # سیستم زیرمجموعه‌گیری
     if len(args) > 1 and args[1].isdigit():
         referrer_id = int(args[1])
-        if referrer_id != user_id and referrer_id not in user_wallets and referrer_id in ADMIN_IDS or True:
-            # ذخیره معرفی‌کننده در صورت نیاز یا پاداش هنگام خرید
+        if referrer_id != user_id:
             user_orders[user_id] = user_orders.get(user_id, {})
             user_orders[user_id]["referrer"] = referrer_id
 
@@ -241,7 +252,7 @@ def free_test_handler(message):
     bot.send_message(message.chat.id, "⏳ در حال ساخت تست رایگان ۱ ساعته (۲۵ مگابایت)... لطفاً صبر کنید.")
     
     test_username = f"test_{user_id}_{int(time.time())}"
-    success, result = create_panel_client(username=test_username, volume_gb=0.024, days=0.04) # حدود ۱ ساعت و ۲۵ مگابایت
+    success, result = create_panel_client(username=test_username, volume_gb=0.024, days=0.04)
 
     if success:
         free_tested_users[user_id] = True
@@ -356,27 +367,50 @@ def referral_handler(message):
     ref_text = (
         f"👥 **سیستم زیرمجموعه‌گیری و دعوت از دوستان**\n\n"
         f"با دعوت دوستان خود به ربات، به ازای هر خرید آن‌ها، هدیه نقدی به کیف پول خود دریافت کنید!\n\n"
-        f"🔗 لینک دعوت اختصاصی شما:\n`{ref_link}`\n\n"
-        f"آن را برای دوستانتان بفرستید."
+        f"🔗 لینک دعوت اختصاصی شما:\n`{ref_link}`"
     )
     bot.send_message(message.chat.id, ref_text, parse_mode="Markdown")
 
-# ---------- راهنمای اتصال ----------
-@bot.message_handler(func=lambda msg: msg.text == "⚙️ راهنمای اتصال")
-def guide_handler(message):
-    guide_text = (
-        "⚙️ **راهنمای اتصال به سرویس‌ها**\n\n"
-        "📱 **اندروید:**\n"
-        "برنامه [V2Box](https://play.google.com/store/apps/details?id=com.v2box.app) یا MahsaNG را دانلود کنید، لینک اشتراک را کپی کرده و داخل برنامه اضافه کنید.\n\n"
-        "🍏 **آیفون (iOS):**\n"
-        "برنامه [FoXray](https://apps.apple.com/us/app/foxray/id6448898396) یا V2Box را از اپ‌استور دانلود کنید.\n\n"
-        "💻 **ویندوز:**\n"
-        "برنامه v2rayN را دانلود کرده و لینک ساب را ایمپورت کنید."
+# ---------- ثبت کد تخفیف ----------
+@bot.message_handler(func=lambda msg: msg.text == "🏷️ ثبت کد تخفیف")
+def coupon_menu_handler(message):
+    msg = bot.send_message(
+        message.chat.id, 
+        "🏷️ لطفاً کد تخفیف خود را ارسال کنید تا روی خرید بعدی شما اعمال شود:"
     )
-    bot.send_message(message.chat.id, guide_text, parse_mode="Markdown", disable_web_page_preview=True)
+    bot.register_next_step_handler(msg, process_global_coupon)
+
+def process_global_coupon(message):
+    user_id = message.from_user.id
+    code = message.text.strip()
+    coupons = load_coupons()
+    
+    if code in coupons:
+        discount_amount = coupons[code]
+        user_orders[user_id] = user_orders.get(user_id, {})
+        user_orders[user_id]["discount"] = discount_amount
+        bot.send_message(
+            message.chat.id, 
+            f"✅ کد تخفیف `{code}` با موفقیت ثبت شد!\nمبلغ **{discount_amount:,} تومان** تخفیف روی خرید بعدی شما اعمال خواهد شد."
+        )
+    else:
+        bot.send_message(message.chat.id, "❌ کد تخفیف وارد شده نامعتبر یا منقضی شده است.")
+
+# ---------- حساب کاربری ----------
+@bot.message_handler(func=lambda msg: msg.text == "👤 حساب کاربری")
+def account_handler(message):
+    user_id = message.from_user.id
+    balance = user_wallets.get(user_id, 0)
+    acc_text = (
+        f"👤 **اطلاعات حساب کاربری شما**\n\n"
+        f"🆔 آیدی عددی: `{user_id}`\n"
+        f"💰 موجودی کیف پول: **{balance:,} تومان**\n"
+        f"🎁 وضعیت تست رایگان: {'استفاده شده ❌' if user_id in free_tested_users else 'استفاده نشده ✅'}"
+    )
+    bot.send_message(message.chat.id, acc_text, parse_mode="Markdown")
 
 # ---------- استعلام سرویس من ----------
-@bot.message_handler(func=lambda msg: msg.text == "📊 سرویس‌های من")
+@bot.message_handler(func=lambda msg: msg.text == "📦 سرویس‌های من")
 def my_services_handler(message):
     bot.send_message(message.chat.id, "📊 برای استعلام وضعیت و حجم مصرفی، لطفاً نام کاربری اشتراک خود را ارسال کنید:")
     bot.register_next_step_handler(message, process_check_service)
@@ -407,8 +441,8 @@ def process_check_service(message):
         pass
     bot.send_message(message.chat.id, "❌ کاربری با این نام در پنل یافت نشد یا خطا در برقراری ارتباط رخ داد.")
 
-# ---------- خرید سرویس و کد تخفیف ----------
-@bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس")
+# ---------- خرید سرویس جدید ----------
+@bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس جدید")
 def show_plans(message):
     bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خودت رو انتخاب کن:", reply_markup=plans_keyboard())
 
@@ -423,7 +457,10 @@ def select_plan(call):
     if plan_id not in PLANS:
         return
     bot.answer_callback_query(call.id)
-    user_orders[call.from_user.id] = {"plan": PLANS[plan_id], "discount": 0}
+    user_id = call.from_user.id
+    current_discount = user_orders.get(user_id, {}).get("discount", 0)
+    
+    user_orders[user_id] = {"plan": PLANS[plan_id], "discount": current_discount}
 
     msg = bot.edit_message_text(
         f"شما پلن **{PLANS[plan_id]['name']}** را انتخاب کردید.\n\n"
@@ -451,22 +488,6 @@ def process_username(message):
         f"🏷️ تخفیف اعمال شده: **{discount:,} تومان**\n"
         f"💵 مبلغ قابل پرداخت: **{final_price:,} تومان**\n\n"
         f"💰 موجودی کیف پول شما: **{balance:,} تومان**\n\n"
-        f"لطفاً روش پرداخت یا اعمال کد تخفیف را انتخاب کنید:"
+        f"لطفاً روش پرداخت را انتخاب کنید:"
     )
-    bot.send_message(message.chat.id, invoice_text, reply_markup=payment_method_keyboard(), parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data == "apply_coupon")
-def ask_coupon(call):
-    bot.answer_callback_query(call.id)
-    msg = bot.send_message(call.message.chat.id, "لطفاً کد تخفیف خود را ارسال کنید:")
-    bot.register_next_step_handler(msg, process_coupon)
-
-def process_coupon(message):
-    user_id = message.from_user.id
-    code = message.text.strip()
-    coupons = load_coupons()
-    
-    if code in coupons:
-        discount_amount = coupons[code]
-        user_orders[user_id]["discount"] = discount_amount
-        bot.send_message(message.chat.id, f"✅ کد تخفیف با موفقیت اعمال شد! مقدار تخفیف: {discoun
+    bot.send_message(message.chat.id, invo
