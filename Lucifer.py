@@ -8,6 +8,8 @@ import time
 BOT_TOKEN = "8735674807:AAG31UzjXyzFLigtXv"
 bot = telebot.TeleBot(BOT_TOKEN)
 
+BOT_USERNAME = "LUC1FER_VPN_BOT"  # آیدی ربات بدون @
+
 ADMIN_IDS = [8738097569, 7384095755]
 CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
@@ -17,10 +19,16 @@ PANEL_URL = "https://www.speedur.org:2096"
 PANEL_USERNAME = "LuciferZzz"
 PANEL_PASSWORD = "OMIDLucifer#01"
 
+# ==================== لیست قیمت جدید (۳۰ روزه) ====================
 PLANS = {
-    "1": {"name": "۱۰ گیگابایت", "price": 15000},
-    "2": {"name": "۲۰ گیگابایت", "price": 25000},
-    "3": {"name": "۳۰ گیگابایت", "price": 35000}
+    "1": {"name": "۱ گیگابایت (۳۰ روزه)", "price": 15000},
+    "2": {"name": "۵ گیگابایت (۳۰ روزه)", "price": 25000},
+    "3": {"name": "۱۰ گیگابایت (۳۰ روزه)", "price": 50000},
+    "4": {"name": "۲۰ گیگابایت (۳۰ روزه)", "price": 100000},
+    "5": {"name": "۳۰ گیگابایت (۳۰ روزه)", "price": 150000},
+    "6": {"name": "۴۰ گیگابایت (۳۰ روزه)", "price": 200000},
+    "7": {"name": "۵۰ گیگابایت (۳۰ روزه)", "price": 250000},
+    "8": {"name": "نامحدود (۳۰ روزه)", "price": 350000}
 }
 
 # ==================== دریافت توکن پنل ====================
@@ -64,14 +72,14 @@ def handle_messages(message):
 
     # ۱. خرید سرویس
     if text == "🛒 خرید سرویس":
-        markup = types.InlineKeyboardMarkup()
+        markup = types.InlineKeyboardMarkup(row_width=1)
         for plan_id, plan_info in PLANS.items():
             btn = types.InlineKeyboardButton(
-                f"{plan_info['name']} - {plan_info['price']} تومان", 
+                f"🔹 {plan_info['name']} - {plan_info['price']:,} تومان", 
                 callback_data=f"buy_{plan_id}"
             )
             markup.add(btn)
-        bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خود را انتخاب کنید:", reply_markup=markup)
+        bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خود را برای خرید انتخاب کنید:", reply_markup=markup)
 
     # ۲. کیف پول
     elif text == "👛 کیف پول":
@@ -86,7 +94,7 @@ def handle_messages(message):
     # ۳. زیرمجموعه‌گیری
     elif text == "👥 زیرمجموعه‌گیری":
         user_id = message.from_user.id
-        ref_link = f"https://t.me/lucifer_vpn_bot?start={user_id}"
+        ref_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
         ref_text = (
             "🎁 **بخش زیرمجموعه‌گیری**\n\n"
             "با دعوت دوستان خود از طریق لینک زیر هدیه بگیرید:\n\n"
@@ -98,12 +106,12 @@ def handle_messages(message):
     elif text == "🎧 پشتیبانی":
         support_text = (
             "🎧 **بخش پشتیبانی**\n\n"
-            "برای ارتباط با مدیریت و پشتیبانی آنلاین، پیام دهید:\n"
-            "🆔 @LuciferZzz"
+            "برای ارتباط با مدیریت و پشتیبانی آنلاین، پیام دهید:\n\n"
+            "👤 پشتیبانی اول: @Lucifer_ffx\n"
+            "👤 پشتیبانی دوم: @naeyri1"
         )
         bot.send_message(message.chat.id, support_text, parse_mode="Markdown")
 
 # ==================== اجرای ربات ====================
-print("🤖 ربات متصل به پنل روشن شد...")
+print("🤖 ربات با پلن‌های جدید ۳۰ روزه روشن شد...")
 bot.infinity_polling()
-    
