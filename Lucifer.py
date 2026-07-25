@@ -6,7 +6,7 @@ import time
 import uuid
 
 # ==================== تنظیمات عمومی ====================
-BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"  # توکن ربات از BotFather
+BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = [8738097569, 7384095755]
@@ -18,7 +18,6 @@ PANEL_URL = "https://www.speedur.org:2096"
 PANEL_USERNAME = "LuciferZzz"
 PANEL_PASSWORD = "OMIDLucifer#01"
 
-# لیست قیمت‌ها (بدون تغییر)
 PLANS = {
     "1": {"name": "۱ گیگابایت", "price_num": 15000, "price": "15,000 تومان", "volume": 1, "days": 30},
     "5": {"name": "۵ گیگابایت", "price_num": 25000, "price": "25,000 تومان", "volume": 5, "days": 30},
@@ -30,15 +29,13 @@ PLANS = {
     "unlim": {"name": "۳۰ روزه نامحدود", "price_num": 350000, "price": "350,000 تومان", "volume": 0, "days": 30},
 }
 
-# دیتابیس‌های موقت رم
-user_wallets = {}      # نگه داشتن موجودی کاربران
-user_orders = {}       # نگه داشتن سفارشات خرید
-deposit_requests = {}  # نگه داشتن درخواست‌های شارژ کیف پول
+user_wallets = {}
+user_orders = {}
+deposit_requests = {}
 
 # ==================== تابع ساخت کاربر در پنل پاسارگاد ====================
 def create_panel_client(username, volume_gb, days):
     session = requests.Session()
-    requests.packages.urllib3.disable_warnings()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -73,7 +70,6 @@ def create_panel_client(username, volume_gb, days):
     total_bytes = volume_gb * 1024 * 1024 * 1024 if volume_gb > 0 else 0
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
 
-    # روش ۱: API نیتیو پاسارگاد
     pasarguad_payload = {
         "username": username,
         "data_limit": total_bytes,
@@ -92,7 +88,6 @@ def create_panel_client(username, volume_gb, days):
     except Exception:
         pass
 
-    # روش ۲: 3x-ui / v2-ui
     try:
         inbound_id = 1
         inbounds_res = session.get(f"{PANEL_URL}/panel/api/inbounds/list", headers=headers, timeout=12, verify=False)
@@ -184,14 +179,14 @@ def show_wallet(message):
     wallet_text = (
         f"💼 **کیف پول شما**\n\n"
         f"💰 موجودی فعلی: **{balance:,} تومان**\n\n"
-        f"با شارژ کیف پول می‌توانید تمام خریدهای خود را به‌صورت آنی و بدون معطلی انجام دهید."
+        f"با شارژ کیف پول می‌توانید تمام خریدهای خود را به‌صورت آنی انجام دهید."
     )
     bot.send_message(message.chat.id, wallet_text, reply_markup=wallet_keyboard(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == "charge_wallet")
 def start_charge_wallet(call):
     bot.answer_callback_query(call.id)
-    msg = bot.send_message(call.message.chat.id, "لطفاً مبلغ مورد نظر جهت شارژ را به **تومان** و به‌صورت عدد انگلیسی وارد کنید:\n(مثلاً: 50000)")
+    msg = bot.send_message(call.message.chat.id, "لطفاً مبلغ مورد نظر جهت شارژ را به **تومان** وارد کنید:\n(مثلاً: 50000)")
     bot.register_next_step_handler(msg, process_deposit_amount)
 
 def process_deposit_amount(message):
@@ -228,7 +223,7 @@ def process_deposit_receipt(message):
         return
 
     photo_id = message.photo[-1].file_id
-    bot.send_message(message.chat.id, "✅ رسید شارژ دریافت شد. پس از بررسی و تایید ادمین، کیف پول شما شارژ می‌شود.")
+    bot.send_message(message.chat.id, "✅ رسید شارژ دریافت شد. پس از بررسی ادمین، کیف پول شما شارژ می‌شود.")
 
     admin_caption = (
         f"📥 **درخواست شارژ کیف پول**\n"
@@ -243,7 +238,6 @@ def process_deposit_receipt(message):
         except Exception as e:
             print(f"خطا در ارسال به ادمین: {e}")
 
-# تایید/رد شارژ کیف پول توسط ادمین
 @bot.callback_query_handler(func=lambda call: call.data.startswith("depapprove_"))
 def approve_deposit(call):
     if call.from_user.id not in ADMIN_IDS:
@@ -260,7 +254,7 @@ def approve_deposit(call):
 
     bot.send_message(user_id, f"🎉 کیف پول شما با موفقیت مبلغ **{amount:,} تومان** شارژ شد!\n💰 موجودی جدید: **{user_wallets[user_id]:,} تومان**", parse_mode="Markdown")
     bot.edit_message_caption(call.message.caption + f"\n\n✅ **شارژ تایید شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-    bot.answer_callback_query(call.id, "شارژ با موفقیت تایید شد.")
+    bot.answer_callback_query(call.id, "شارژ تایید شد.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("depreject_"))
 def reject_deposit(call):
@@ -269,7 +263,6 @@ def reject_deposit(call):
     user_id = int(call.data.replace("depreject_", ""))
     bot.send_message(user_id, "❌ رسید شارژ کیف پول شما مورد تایید قرار نگرفت.")
     bot.edit_message_caption(call.message.caption + "\n\n❌ **شارژ رد شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id)
-    bot.answer_callback_query(call.id, "درخواست رد شد.")
 
 # --- بخش خرید سرویس ---
 @bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس")
@@ -315,7 +308,6 @@ def process_username(message):
     )
     bot.send_message(message.chat.id, invoice_text, reply_markup=payment_method_keyboard(), parse_mode="Markdown")
 
-# پرداخت از طریق کیف پول
 @bot.callback_query_handler(func=lambda call: call.data == "pay_wallet")
 def pay_via_wallet(call):
     user_id = call.from_user.id
@@ -329,16 +321,14 @@ def pay_via_wallet(call):
     balance = user_wallets.get(user_id, 0)
 
     if balance < price:
-        bot.answer_callback_query(call.id, "❌ موجودی کیف پول شما کافی نیست. لطفا حساب خود را شارژ کنید.", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ موجودی کیف پول کافی نیست.", show_alert=True)
         return
 
-    # کسر از موجودی
     user_wallets[user_id] -= price
     bot.answer_callback_query(call.id, "در حال ساخت سرویس...")
 
-    bot.edit_message_text("⚡️ مبلغ از کیف پول کسر شد. در حال ساخت کانکشن از پنل...", chat_id=call.message.chat.id, message_id=call.message.message_id)
+    bot.edit_message_text("⚡️ مبلغ کسر شد. در حال ساخت کانکشن...", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-    # ساخت آنی اکانت در پنل
     success, result = create_panel_client(
         username=order_info["username"],
         volume_gb=order_info["plan"]["volume"],
@@ -349,11 +339,9 @@ def pay_via_wallet(call):
         user_msg = f"🎉 **خرید با موفقیت انجام شد!**\n\n🔑 لینک کانکشن شما:\n`{result}`"
         bot.send_message(user_id, user_msg, parse_mode="Markdown")
     else:
-        # برگشت وجه در صورت بروز خطا در پنل
         user_wallets[user_id] += price
-        bot.send_message(user_id, f"❌ خطایی در ساخت اکانت رخ داد و مبلغ به کیف پول شما بازگشت داده شد.\nعلت: {result}")
+        bot.send_message(user_id, f"❌ خطا در ساخت اکانت. مبلغ بازگردانده شد.\nعلت: {result}")
 
-# پرداخت با کارت به کارت و عکس رسید
 @bot.callback_query_handler(func=lambda call: call.data == "pay_card")
 def pay_via_card(call):
     bot.answer_callback_query(call.id)
@@ -378,7 +366,7 @@ def process_receipt(message):
 
     order_info = user_orders.get(user_id)
     photo_id = message.photo[-1].file_id
-    bot.send_message(message.chat.id, "✅ رسید ارسال شد. پس از تایید توسط ادمین، سرویس فعال می‌شود.")
+    bot.send_message(message.chat.id, "✅ رسید ارسال شد. پس از تایید ادمین، سرویس فعال می‌شود.")
 
     admin_caption = (
         f"📥 **رسید خرید جدید**\n"
@@ -440,6 +428,6 @@ def support_handler(message):
     )
     bot.send_message(message.chat.id, support_text, parse_mode="Markdown")
 
-print("🤖 ربات LUCIFER VPN به همراه کیف پول هوشمند روشن شد...")
+print("🤖 ربات روشن شد...")
 bot.infinity_polling()
-        
+    
