@@ -162,7 +162,7 @@ def create_panel_client(username, volume_gb, days):
     except Exception as e:
         return False, f"خطای ساخت اکانت: {str(e)}"
 
-# ==================== کیبورد اصلی (طبق چیدمان درخواستی) ====================
+# ==================== کیبورد اصلی (طبق چیدمان درخواستی شما) ====================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(
@@ -174,11 +174,11 @@ def main_keyboard():
     )
     markup.row(
         types.KeyboardButton("💼 کیف پول"),
-        types.KeyboardButton("👤 حساب کاربری")
+        types.KeyboardButton("🏷️ ثبت کد تخفیف")
     )
     markup.row(
         types.KeyboardButton("👥 زیرمجموعه‌گیری"),
-        types.KeyboardButton("🏷️ ثبت کد تخفیف")
+        types.KeyboardButton("👤 حساب کاربری")
     )
     markup.row(
         types.KeyboardButton("📞 پشتیبانی")
@@ -186,10 +186,10 @@ def main_keyboard():
     return markup
 
 def plans_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup = types.InlineKeyboardMarkup(row_width=1)
     buttons = []
     for plan_id, plan_info in PLANS.items():
-        text = f"{plan_info['name']} - {plan_info['price']}"
+        text = f"{plan_info['name']} ⟵ {plan_info['price']}"
         buttons.append(types.InlineKeyboardButton(text=text, callback_data=f"buy_{plan_id}"))
     markup.add(*buttons)
     markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_order"))
@@ -490,4 +490,4 @@ def process_username(message):
         f"💰 موجودی کیف پول شما: **{balance:,} تومان**\n\n"
         f"لطفاً روش پرداخت را انتخاب کنید:"
     )
-    bot.send_message(message.chat.id, invo
+    bot.send_message(message.chat.id, 
