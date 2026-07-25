@@ -15,6 +15,30 @@ ADMIN_IDS = [8738097569, 7384095755]
 CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
 
+# ==================== مدیریت دائمی کیف پول ====================
+WALLET_FILE = "wallets.json"
+
+def load_wallets():
+    if os.path.exists(WALLET_FILE):
+        try:
+            with open(WALLET_FILE, "r", encoding="utf-8") as f:
+                # تبدیل کلیدها به عدد صحیح (چونکه جیسون کلیدها رو استرینگ ذخیره میکنه)
+                return {int(k): v for k, v in json.load(f).items()}
+        except Exception:
+            return {}
+    return {}
+
+def save_wallets():
+    try:
+        with open(WALLET_FILE, "w", encoding="utf-8") as f:
+            json.dump(user_wallets, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"خطا در ذخیره کیف پول: {e}")
+
+user_wallets = load_wallets()
+user_orders = {}
+deposit_requests = {}
+
 # ==================== تنظیمات پنل پاسارگاد ====================
 PANEL_URL = "https://www.speedur.org:2096"
 PANEL_USERNAME = "LuciferZzz"
@@ -30,10 +54,6 @@ PLANS = {
     "50": {"name": "۵۰ گیگابایت", "price_num": 250000, "price": "250,000 تومان", "volume": 50, "days": 30},
     "unlim": {"name": "۳۰ روزه نامحدود", "price_num": 350000, "price": "350,000 تومان", "volume": 0, "days": 30},
 }
-
-user_wallets = {}
-user_orders = {}
-deposit_requests = {}
 
 # ==================== تابع ساخت کاربر در پنل پاسارگاد ====================
 def create_panel_client(username, volume_gb, days):
@@ -251,6 +271,7 @@ def approve_deposit(call):
 
     amount = dep_info["amount"]
     user_wallets[user_id] = user_wallets.get(user_id, 0) + amount
+    save_wallets()  # ذخیره در فایل
 
     bot.send_message(user_id, f"🎉 کیف پول شما با موفقیت مبلغ **{amount:,} تومان** شارژ شد!\n💰 موجودی جدید: **{user_wallets[user_id]:,} تومان**", parse_mode="Markdown")
     bot.edit_message_caption(call.message.caption + f"\n\n✅ **شارژ تایید شد.**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
@@ -324,6 +345,7 @@ def pay_via_wallet(call):
         return
 
     user_wallets[user_id] -= price
+    save_wallets()  # ذخیره در فایل
     bot.answer_callback_query(call.id, "در حال ساخت سرویس...")
 
     bot.edit_message_text("⚡️ مبلغ کسر شد. در حال ساخت کانکشن...", chat_id=call.message.chat.id, message_id=call.message.message_id)
@@ -339,6 +361,7 @@ def pay_via_wallet(call):
         bot.send_message(user_id, user_msg, parse_mode="Markdown")
     else:
         user_wallets[user_id] += price
+        save_wallets()  # ذخیره در فایل در صورت خطا و برگشت پول
         bot.send_message(user_id, f"❌ خطا در ساخت اکانت. مبلغ بازگردانده شد.\nعلت: {result}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "pay_card")
@@ -444,4 +467,4 @@ if __name__ == "__main__":
     
     print("🤖 ربات روشن شد...")
     bot.infinity_polling()
-                
+    
