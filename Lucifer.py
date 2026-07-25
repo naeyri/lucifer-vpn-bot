@@ -187,7 +187,7 @@ def admin_deposit_keyboard(user_id):
     markup = types.InlineKeyboardMarkup()
     markup.row(types.InlineKeyboardButton("✅ تایید شارژ حساب", callback_data=f"depapprove_{user_id}"), types.InlineKeyboardButton("❌ رد شارژ", callback_data=f"depreject_{user_id}"))
     return markup
-    @bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start'])
 def start_handler(message):
     user_id = message.from_user.id
     bot.send_message(message.chat.id, f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید.", reply_markup=main_keyboard(user_id), parse_mode="Markdown")
