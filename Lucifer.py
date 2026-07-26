@@ -101,7 +101,12 @@ def create_panel_client(username, volume_gb, days):
     if not token:
         return False, "خطا در احراز هویت با پنل مرزبان."
 
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "accept": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "accept": "application/json"
+    }
+    
     expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else None
     total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
 
@@ -114,20 +119,24 @@ def create_panel_client(username, volume_gb, days):
         "data_limit_reset_strategy": "no_reset"
     }
 
-    for url in [f"{PANEL_URL}/api/users", f"{PANEL_URL}/api/user"]:
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=15, verify=False)
-            if response.status_code in [200, 201]:
-                user_data = response.json()
+    url = f"{PANEL_URL}/api/user"
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15, verify=False)
+        if response.status_code in [200, 201]:
+            user_data = response.json()
+            sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
+            return True, sub_url
+        else:
+            url_alt = f"{PANEL_URL}/api/users"
+            response_alt = requests.post(url_alt, json=payload, headers=headers, timeout=15, verify=False)
+            if response_alt.status_code in [200, 201]:
+                user_data = response_alt.json()
                 sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
                 return True, sub_url
-            elif response.status_code == 404:
-                continue
             else:
-                return False, f"پاسخ پنل: {response.text}"
-        except:
-            continue
-    return False, "مسیر ساخت کاربر در پنل یافت نشد."
+                return False, f"پاسخ پنل: {response_alt.text}"
+    except Exception as e:
+        return False, f"خطای ارتباط با پنل: {str(e)}"
 
 def get_user_panel_info(username):
     token = get_marzban_token()
@@ -174,7 +183,7 @@ def modify_user_in_panel(username, add_volume_gb=0, add_days=0):
             return False, response.text
     except Exception as e:
         return False, str(e)
-        # ==================== کیبوردها ====================
+# ==================== کیبوردها ====================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(types.KeyboardButton("🛒 خرید سرویس"), types.KeyboardButton("📦 سرویس‌های من"))
@@ -355,7 +364,6 @@ def reject_deposit(call):
     bot.answer_callback_query(call.id, "درخواست رد شد.")
     bot.send_message(user_id, "❌ رسید شارژ کیف پول شما تایید نشد.", reply_markup=main_keyboard())
     bot.edit_message_caption(call.message.caption + "\n\n❌ رد شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
-
 # ==================== مدیریت سرویس‌ها و عملیات تکمیلی ====================
 @bot.message_handler(func=lambda msg: msg.text == "📦 سرویس‌های من")
 def show_user_services(message):
@@ -614,4 +622,4 @@ if __name__ == "__main__":
     keep_alive()
     print("🤖 ربات پیشرفته LUCIFER VPN روشن شد...")
     bot.infinity_polling()
-                                            
+    
