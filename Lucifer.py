@@ -6,6 +6,10 @@ import os
 import time
 from flask import Flask
 import threading
+import urllib3
+
+# غیرفعال کردن اخطار SSL در صورت خودایمن نبودن گواهی پنل
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== تنظیمات وب سرور جهت روشن ماندن 24 ساعته ====================
 app = Flask('')
@@ -85,6 +89,8 @@ def get_marzban_token():
         response = requests.post(url, data=data, headers=headers, timeout=10, verify=False)
         if response.status_code == 200:
             return response.json().get("access_token")
+        else:
+            print(f"Token Failed: {response.text}")
     except Exception as e:
         print(f"Token Error: {e}")
     return None
@@ -92,9 +98,8 @@ def get_marzban_token():
 def create_panel_client(username, volume_gb, days):
     token = get_marzban_token()
     if not token:
-        return False, "خطا در احراز هویت با پنل (ارتباط با توکن برقرار نشد)."
+        return False, "خطا در احراز هویت با پنل (ارتباط با توکن برقرار نشد یا نام کاربری/رمز پنل اشتباه است)."
 
-    url = f"{PANEL_URL}/api/user"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -121,16 +126,27 @@ def create_panel_client(username, volume_gb, days):
         "data_limit_reset_strategy": "no_reset"
     }
 
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15, verify=False)
-        if response.status_code in [200, 201]:
-            user_data = response.json()
-            sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
-            return True, sub_url
-        else:
-            return False, f"پاسخ پنل: {response.text}"
-    except Exception as e:
-        return False, f"خطای ارتباطی: {str(e)}"
+    # تلاش برای تست مسیرهای مختلف ساخت کاربر در مرزبان برای جلوگیری از خطای Not Found
+    possible_endpoints = [
+        f"{PANEL_URL}/api/users",
+        f"{PANEL_URL}/api/user"
+    ]
+
+    for url in possible_endpoints:
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=15, verify=False)
+            if response.status_code in [200, 201]:
+                user_data = response.json()
+                sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
+                return True, sub_url
+            elif response.status_code == 404:
+                continue # اگر مسیر پیدا نشد، مسیر بعدی رو تست میکنه
+            else:
+                return False, f"پاسخ پنل: {response.text}"
+        except Exception as e:
+            continue
+
+    return False, "پاسخ پنل: Not Found (مسیر ساخت کاربر در این نسخه از پنل یافت نشد)."
 
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -477,5 +493,4 @@ if __name__ == "__main__":
     keep_alive()
     print("🤖 ربات روشن شد...")
     bot.infinity_polling()
-                            
     
