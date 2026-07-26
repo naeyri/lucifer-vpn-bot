@@ -560,6 +560,24 @@ def reject_order(call):
     bot.send_message(user_id, "❌ رسید پرداخت شما توسط ادمین تایید نشد.", reply_markup=main_keyboard())
     bot.edit_message_caption(call.message.caption + f"\n\n❌ رد شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
+from flask import Flask
+import threading
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_web)
+    t.start()
+
 if __name__ == "__main__":
+    keep_alive()  # این خط سرور وب رو روشن نگه می‌داره
     print("🤖 ربات روشن شد...")
     bot.infinity_polling()
+    
