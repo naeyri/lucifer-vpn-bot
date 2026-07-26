@@ -4,6 +4,22 @@ import requests
 import json
 import os
 import time
+from flask import Flask
+import threading
+
+# ==================== تنظیمات وب سرور جهت روشن ماندن 24 ساعته ====================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_web)
+    t.start()
 
 # ==================== تنظیمات عمومی ====================
 BOT_TOKEN = "8735674807:AAG3lUzjXyzFLigtXvDrQa1KzX5HDiWfHM4"
@@ -12,17 +28,13 @@ bot = telebot.TeleBot(BOT_TOKEN)
 ADMIN_IDS = [8738097569, 7384095755]
 CARD_NUMBER = "5859831139452311"
 CARD_HOLDER = "امید جوادی"
-
-# آیدی‌های پشتیبانی جدید
-SUPPORT_GENERAL = "@Lucifer_ffx"
-SUPPORT_BUGS = "@naeyri1"
+SUPPORT_ID = "@naeyri1"
 
 # ==================== مسیر فایل‌های ذخیره‌سازی ====================
 WALLETS_FILE = "wallets.json"
 FREE_TEST_FILE = "free_tested.json"
 REFERRALS_FILE = "referrals.json"
 
-# ==================== توابع مدیریت دیتابیس محلی ====================
 def load_json(filename):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
@@ -40,7 +52,7 @@ user_wallets = load_json(WALLETS_FILE)
 free_tested_users = load_json(FREE_TEST_FILE)
 referral_data = load_json(REFERRALS_FILE)
 
-# ==================== تنظیمات پنل پاسارگاد ====================
+# ==================== تنظیمات پنل مرزبان ====================
 PANEL_URL = "https://www.speedur.org:2096"
 PANEL_USERNAME = "LuciferZzz"
 PANEL_PASSWORD = "OMIDLucifer#01"
@@ -59,93 +71,67 @@ PLANS = {
 user_orders = {}
 deposit_requests = {}
 
-# ==================== تابع ساخت کاربر پاسارگاد ====================
-def create_panel_client(username, volume_gb, days):
-    session = requests.Session()
-    requests.packages.urllib3.disable_warnings()
-
+def get_marzban_token():
+    url = f"{PANEL_URL}/api/admin/token"
+    data = {
+        "username": PANEL_USERNAME,
+        "password": PANEL_PASSWORD
+    }
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "accept": "application/json"
     }
-
-    token = None
     try:
-        login_res = session.post(
-            f"{PANEL_URL}/api/admin/token",
-            data={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
-            timeout=12,
-            verify=False
-        )
-        if login_res.status_code == 200:
-            token = login_res.json().get("access_token")
-            headers["Authorization"] = f"Bearer {token}"
-        else:
-            login_res = session.post(
-                f"{PANEL_URL}/api/admin/token",
-                json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
-                timeout=12,
-                verify=False
-            )
-            if login_res.status_code == 200:
-                token = login_res.json().get("access_token")
-                headers["Authorization"] = f"Bearer {token}"
-    except Exception:
-        pass
-
-    total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
-    expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else 0
-
-    pasarguad_payload = {
-        "username": username,
-        "data_limit": total_bytes,
-        "expire": expire_timestamp,
-        "status": "active",
-        "proxies": {"vless": {}},
-        "inbounds": {}
-    }
-
-    try:
-        user_res = session.post(f"{PANEL_URL}/api/user", json=pasarguad_payload, headers=headers, timeout=12, verify=False)
-        if user_res.status_code in [200, 201]:
-            user_data = user_res.json()
-            sub_url = user_data.get("subscription_url", f"{PANEL_URL}/sub/{username}")
-            return True, sub_url
-    except Exception:
-        pass
-
-    try:
-        inbound_id = 1
-        inbounds_res = session.get(f"{PANEL_URL}/panel/api/inbounds/list", headers=headers, timeout=12, verify=False)
-        if inbounds_res.status_code == 200:
-            objs = inbounds_res.json().get("obj", [])
-            if objs:
-                inbound_id = objs[0]["id"]
-
-        import uuid
-        client_payload = {
-            "id": inbound_id,
-            "settings": json.dumps({
-                "clients": [{
-                    "id": str(uuid.uuid4()),
-                    "email": username,
-                    "totalGB": total_bytes,
-                    "expiryTime": days * 24 * 60 * 60 * 1000,
-                    "enable": True
-                }]
-            })
-        }
-        add_res = session.post(f"{PANEL_URL}/panel/api/inbounds/addClient", json=client_payload, headers=headers, timeout=12, verify=False)
-        res_json = add_res.json()
-        if res_json.get("success"):
-            return True, f"{PANEL_URL}/sub/{username}"
-        else:
-            return False, f"پاسخ پنل: {res_json.get('msg', add_res.text)}"
+        response = requests.post(url, data=data, headers=headers, timeout=10, verify=False)
+        if response.status_code == 200:
+            return response.json().get("access_token")
     except Exception as e:
-        return False, f"خطای ساخت اکانت: {str(e)}"
+        print(f"Token Error: {e}")
+    return None
 
-# ==================== کیبوردها ====================
+def create_panel_client(username, volume_gb, days):
+    token = get_marzban_token()
+    if not token:
+        return False, "خطا در احراز هویت با پنل (ارتباط با توکن برقرار نشد)."
+
+    url = f"{PANEL_URL}/api/user"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "accept": "application/json"
+    }
+    
+    expire_timestamp = int(time.time()) + (days * 86400) if days > 0 else None
+    total_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
+
+    payload = {
+        "username": username,
+        "proxies": {
+            "vless": {},
+            "vmess": {},
+            "trojan": {}
+        },
+        "inbounds": {
+            "vless": ["VLESS + TLS", "VLESS TCP"],
+            "vmess": ["VMess TCP"],
+            "trojan": ["Trojan TCP"]
+        },
+        "expire": expire_timestamp,
+        "data_limit": total_bytes,
+        "data_limit_reset_strategy": "no_reset"
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15, verify=False)
+        if response.status_code in [200, 201]:
+            user_data = response.json()
+            sub_url = user_data.get("subscription_url") or f"{PANEL_URL}/sub/{username}"
+            return True, sub_url
+        else:
+            return False, f"پاسخ پنل: {response.text}"
+    except Exception as e:
+        return False, f"خطای ارتباطی: {str(e)}"
+
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(types.KeyboardButton("🛒 خرید سرویس"), types.KeyboardButton("🎁 تست رایگان"))
@@ -192,9 +178,7 @@ def admin_deposit_keyboard(user_id, amount):
         types.InlineKeyboardButton("❌ رد", callback_data=f"deprej_{user_id}")
     )
     return markup
-
-# ==================== هندلرها ====================
-@bot.message_handler(commands=['start'])
+    @bot.message_handler(commands=['start'])
 def start_handler(message):
     user_id = message.from_user.id
     args = message.text.split()
@@ -218,14 +202,13 @@ def start_handler(message):
         except:
             pass
 
-    welcome_text = f"سلام {message.from_user.first_name} عزیز! 🌹\nبه ربات LUCIFER VPN خوش آمدید."
+    welcome_text = "به دنیای ارتباط امن و پرسرعت **LUCIFER VPN** خوش آمدید! 🚀⚡️\n\nبا استفاده از منوی زیر می‌توانید سرویس خود را خریداری کنید، تست رایگان بگیرید یا از امکانات کیف پول و پشتیبانی بهره‌مند شوید 👇"
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_keyboard(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda msg: msg.text == "🛒 خرید سرویس")
 def show_plans(message):
     bot.send_message(message.chat.id, "لطفاً پلن مورد نظر خودت رو انتخاب کن:", reply_markup=plans_keyboard())
 
-# ==================== تست رایگان ====================
 @bot.message_handler(func=lambda msg: msg.text == "🎁 تست رایگان")
 def free_test_handler(message):
     user_id = message.from_user.id
@@ -252,7 +235,6 @@ def free_test_handler(message):
     else:
         bot.send_message(message.chat.id, f"❌ خطا در ساخت تست رایگان:\n{result}", reply_markup=main_keyboard())
 
-# ==================== کیف پول و شارژ ====================
 @bot.message_handler(func=lambda msg: msg.text == "💼 کیف پول")
 def show_wallet(message):
     user_id = str(message.from_user.id)
@@ -341,25 +323,15 @@ def referral_handler(message):
     ref_count = len(referral_data.get(str(user_id), []))
     bot.send_message(message.chat.id, f"👥 **سیستم زیرمجموعه‌گیری**\n\n🔗 لینک دعوت شما:\n`{ref_link}`\n\n👤 تعداد زیرمجموعه‌ها: **{ref_count} نفر**\n🎁 با هر دعوت موفق، **۵,۰۰۰ تومان** هدیه بگیرید!", reply_markup=main_keyboard(), parse_mode="Markdown")
 
-# ==================== بخش پشتیبانی دوگانه ====================
 @bot.message_handler(func=lambda msg: msg.text == "📞 پشتیبانی")
 def support_handler(message):
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton("💬 پشتیبانی اول", url=f"https://t.me/{SUPPORT_GENERAL.replace('@', '')}"),
-        types.InlineKeyboardButton("🛠 پشتیبانی مشکلات ربات", url=f"https://t.me/{SUPPORT_BUGS.replace('@', '')}")
-    )
-    bot.send_message(
-        message.chat.id, 
-        "لطفاً نوع پشتیبانی مورد نظر خود را انتخاب کنید:", 
-        reply_markup=markup
-)
+    bot.send_message(message.chat.id, f"📞 برای ارتباط با پشتیبانی به آیدی زیر پیام دهید:\n{SUPPORT_ID}", reply_markup=main_keyboard())
+
 @bot.callback_query_handler(func=lambda call: call.data == "cancel_order")
 def cancel_order(call):
     bot.answer_callback_query(call.id)
     bot.edit_message_text("سفارش شما لغو شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-# ==================== فرآیند خرید سرویس ====================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
 def select_plan(call):
     plan_id = call.data.replace("buy_", "")
@@ -392,7 +364,6 @@ def process_username(message):
     )
     bot.send_message(message.chat.id, invoice_text, reply_markup=payment_method_keyboard(), parse_mode="Markdown")
 
-# پرداخت از کیف پول
 @bot.callback_query_handler(func=lambda call: call.data == "pay_wallet")
 def pay_via_wallet(call):
     user_id = call.from_user.id
@@ -424,7 +395,6 @@ def pay_via_wallet(call):
         save_json(WALLETS_FILE, user_wallets)
         bot.send_message(user_id, f"❌ خطا در ساخت اکانت:\n{result}", reply_markup=main_keyboard())
 
-# پرداخت کارت به کارت
 @bot.callback_query_handler(func=lambda call: call.data == "pay_card")
 def pay_via_card(call):
     bot.answer_callback_query(call.id)
@@ -503,23 +473,9 @@ def reject_order(call):
     bot.send_message(user_id, "❌ رسید پرداخت شما توسط ادمین تایید نشد.", reply_markup=main_keyboard())
     bot.edit_message_caption(call.message.caption + f"\n\n❌ رد شد.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
-from flask import Flask
-import threading
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-def run_web():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = threading.Thread(target=run_web)
-    t.start()
-
 if __name__ == "__main__":
     keep_alive()
     print("🤖 ربات روشن شد...")
     bot.infinity_polling()
+                            
+    
