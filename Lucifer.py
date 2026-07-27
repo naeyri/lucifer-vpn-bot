@@ -33,6 +33,7 @@ CARD_HOLDER = "امید جوادی"
 WALLETS_FILE = "wallets.json"
 FREE_TEST_FILE = "free_tested.json"
 REFERRALS_FILE = "referrals.json"
+SERVICES_FILE = "user_services.json"
 
 def load_json(filename):
     if os.path.exists(filename):
@@ -50,6 +51,7 @@ def save_json(filename, data):
 user_wallets = load_json(WALLETS_FILE)
 free_tested_users = load_json(FREE_TEST_FILE)
 referral_data = load_json(REFERRALS_FILE)
+user_services_db = load_json(SERVICES_FILE)
 
 PANEL_URL = "https://www.speedur.org:2096"
 PANEL_USERNAME = "LuciferZzz"
@@ -141,8 +143,8 @@ def create_panel_client(username, volume_gb, days):
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(types.KeyboardButton("🛒 خرید سرویس"), types.KeyboardButton("🎁 تست رایگان"))
-    markup.row(types.KeyboardButton("💼 کیف پول"), types.KeyboardButton("👥 زیرمجموعه‌گیری"))
-    markup.row(types.KeyboardButton("📞 پشتیبانی"))
+    markup.row(types.KeyboardButton("📦 سرویس‌های من"), types.KeyboardButton("💼 کیف پول"))
+    markup.row(types.KeyboardButton("👥 زیرمجموعه‌گیری"), types.KeyboardButton("📞 پشتیبانی"))
     return markup
 
 def plans_keyboard():
@@ -192,6 +194,22 @@ def admin_deposit_keyboard(user_id, amount):
         types.InlineKeyboardButton("❌ رد", callback_data=f"deprej_{user_id}")
     )
     return markup
+
+def user_services_keyboard(user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    u_services = user_services_db.get(str(user_id), [])
+    for idx, s in enumerate(u_services):
+        markup.add(types.InlineKeyboardButton(f"📌 {s['username']} ({s['plan_name']})", callback_data=f"myserv_{idx}"))
+    markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_main"))
+    return markup
+
+def single_service_keyboard():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔄 تمدید سرویس", callback_data="renew_service"),
+        types.InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_services")
+    )
+    return markup
     @bot.message_handler(commands=['start'])
 def start_handler(message):
     user_id = message.from_user.id
@@ -239,6 +257,17 @@ def free_test_handler(message):
         free_tested_users[str(user_id)] = True
         save_json(FREE_TEST_FILE, free_tested_users)
         
+        if str(user_id) not in user_services_db:
+            user_services_db[str(user_id)] = []
+        user_services_db[str(user_id)].append({
+            "username": test_username,
+            "plan_name": "تست رایگان",
+            "sub_url": result,
+            "volume": 0.0244,
+            "days": 1
+        })
+        save_json(SERVICES_FILE, user_services_db)
+        
         test_msg = (
             f"🎁 **تست رایگان شما با موفقیت ساخته شد!**\n\n"
             f"👤 نام کاربری: `{test_username}`\n"
@@ -248,6 +277,50 @@ def free_test_handler(message):
         bot.send_message(message.chat.id, test_msg, reply_markup=main_keyboard(), parse_mode="Markdown")
     else:
         bot.send_message(message.chat.id, f"❌ خطا در ساخت تست رایگان:\n{result}", reply_markup=main_keyboard())
+
+@bot.message_handler(func=lambda msg: msg.text == "📦 سرویس‌های من")
+def show_user_services(message):
+    user_id = str(message.from_user.id)
+    u_services = user_services_db.get(user_id, [])
+    if not u_services:
+        bot.send_message(message.chat.id, "❌ شما هیچ سرویس فعالی ندارید.", reply_markup=main_keyboard())
+        return
+    bot.send_message(message.chat.id, "📦 سرویس‌های فعال شما:", reply_markup=user_services_keyboard(user_id))
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("myserv_"))
+def show_single_service(call):
+    user_id = str(call.from_user.id)
+    idx = int(call.data.split("_")[1])
+    u_services = user_services_db.get(user_id, [])
+    if idx >= len(u_services):
+        bot.answer_callback_query(call.id, "سرویس یافت نشد.", show_alert=True)
+        return
+    
+    service = u_services[idx]
+    user_orders[call.from_user.id] = {"selected_service_index": idx, "username": service["username"]}
+    
+    text = (
+        f"📌 جزئیات سرویس:\n\n"
+        f"👤 نام کاربری: `{service['username']}`\n"
+        f"📦 پلن: {service['plan_name']}\n\n"
+        f"🔑 لینک اشتراک (ساب):\n`{service['sub_url']}`"
+    )
+    bot.edit_message_text(text, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=single_service_keyboard(), parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_services")
+def back_to_services(call):
+    user_id = str(call.from_user.id)
+    bot.edit_message_text("📦 سرویس‌های فعال شما:", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=user_services_keyboard(user_id))
+
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_main")
+def back_to_main(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    bot.send_message(call.message.chat.id, "منوی اصلی:", reply_markup=main_keyboard())
+
+@bot.callback_query_handler(func=lambda call: call.data == "renew_service")
+def renew_service_menu(call):
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text("لطفاً پلن تمدید مورد نظر خود را انتخاب کنید:", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=plans_keyboard())
 
 @bot.message_handler(func=lambda msg: msg.text == "💼 کیف پول")
 def show_wallet(message):
@@ -352,19 +425,34 @@ def select_plan(call):
     if plan_id not in PLANS:
         return
     bot.answer_callback_query(call.id)
-    user_orders[call.from_user.id] = {"plan": PLANS[plan_id]}
+    
+    if call.from_user.id not in user_orders:
+        user_orders[call.from_user.id] = {}
+    user_orders[call.from_user.id]["plan"] = PLANS[plan_id]
 
-    msg = bot.edit_message_text(
-        f"شما پلن {PLANS[plan_id]['name']} را انتخاب کردید.\n\n"
-        f"لطفاً نام کاربری انگلیسی دلخواه ارسال کنید:",
-        chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown"
-    )
-    bot.register_next_step_handler(msg, process_username)
+    # اگر کاربر در حال تمدید سرویس قبلی خودش باشد، نام کاربری از قبل وجود دارد
+    if "username" in user_orders[call.from_user.id] and user_orders[call.from_user.id].get("selected_service_index") is not None:
+        selected_plan = PLANS[plan_id]
+        invoice_text = (
+            f"🧾 فاکتور تمدید سرویس (LUCIFER VPN)\n\n"
+            f"📌 نام کاربری: `{user_orders[call.from_user.id]['username']}`\n"
+            f"📦 سرویس جدید: {selected_plan['name']}\n"
+            f"💰 قیمت: {selected_plan['price']}\n\n"
+            f"روش پرداخت را انتخاب کنید:"
+        )
+        bot.edit_message_text(invoice_text, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=payment_method_keyboard(), parse_mode="Markdown")
+    else:
+        msg = bot.edit_message_text(
+            f"شما پلن {PLANS[plan_id]['name']} را انتخاب کردید.\n\n"
+            f"لطفاً نام کاربری انگلیسی دلخواه ارسال کنید:",
+            chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown"
+        )
+        bot.register_next_step_handler(msg, process_username)
 
 def process_username(message):
     user_id = message.from_user.id
     if user_id not in user_orders:
-        return
+        user_orders[user_id] = {}
     username_input = message.text.strip().replace(" ", "_")
     user_orders[user_id]["username"] = username_input
     selected_plan = user_orders[user_id]["plan"]
@@ -394,12 +482,33 @@ def pay_via_wallet(call):
 
     user_wallets[str(user_id)] = current_bal - price
     save_json(WALLETS_FILE, user_wallets)
-    bot.answer_callback_query(call.id, "در حال ساخت اکانت...")
+    bot.answer_callback_query(call.id, "در حال پردازش...")
 
     success, result = create_panel_client(order["username"], plan["volume"], plan["days"])
     if success:
+        if str(user_id) not in user_services_db:
+            user_services_db[str(user_id)] = []
+        
+        # بررسی اینکه آیا سرویس تمدید بوده یا جدید
+        found = False
+        for s in user_services_db[str(user_id)]:
+            if s["username"] == order["username"]:
+                s["plan_name"] = plan["name"]
+                s["sub_url"] = result
+                found = True
+                break
+        if not found:
+            user_services_db[str(user_id)].append({
+                "username": order["username"],
+                "plan_name": plan["name"],
+                "sub_url": result,
+                "volume": plan["volume"],
+                "days": plan["days"]
+            })
+        save_json(SERVICES_FILE, user_services_db)
+
         success_msg = (
-            f"🎉 خرید موفق با کیف پول انجام شد!\n\n"
+            f"🎉 خرید / تمدید موفق با کیف پول انجام شد!\n\n"
             f"👤 نام کاربری: `{order['username']}`\n\n"
             f"🔑 لینک اشتراک (ساب):\n`{result}`"
         )
@@ -434,7 +543,7 @@ def process_receipt(message):
     bot.send_message(message.chat.id, "✅ رسید ارسال شد. پس از تایید ادمین، سرویس فعال می‌شود.", reply_markup=main_keyboard())
 
     admin_caption = (
-        f"📥 رسید جدید خرید\n"
+        f"📥 رسید جدید خرید/تمدید\n"
         f"👤 کاربر: {message.from_user.first_name}\n"
         f"🆔 آیدی عددی: `{user_id}`\n"
         f"📦 سرویس: {order_info['plan']['name']}\n"
@@ -468,6 +577,26 @@ def approve_order(call):
     )
 
     if success:
+        if str(user_id) not in user_services_db:
+            user_services_db[str(user_id)] = []
+        
+        found = False
+        for s in user_services_db[str(user_id)]:
+            if s["username"] == order_info["username"]:
+                s["plan_name"] = order_info["plan"]["name"]
+                s["sub_url"] = result
+                found = True
+                break
+        if not found:
+            user_services_db[str(user_id)].append({
+                "username": order_info["username"],
+                "plan_name": order_info["plan"]["name"],
+                "sub_url": result,
+                "volume": order_info["plan"]["volume"],
+                "days": order_info["plan"]["days"]
+            })
+        save_json(SERVICES_FILE, user_services_db)
+
         user_msg = (
             f"🎉 پرداخت شما توسط ادمین تایید شد!\n\n"
             f"👤 نام کاربری: `{order_info['username']}`\n\n"
