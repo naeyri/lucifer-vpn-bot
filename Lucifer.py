@@ -57,7 +57,7 @@ coupons_db = load_json(COUPONS_FILE, {"LUCIFER": 20}) # کد تخفیف پیش�
 
 PANEL_URL = "https://www.speedur.org:2096"
 PANEL_USERNAME = "LuciferZzz"
-PANEL_PASSWORD = "OMIDLucifer#01"
+PANEL_PASSWORD = "Lucifer#666FFx"
 
 PLANS = {
     "1": {"name": "۱ گیگابایت", "price": "15,000 تومان", "price_num": 15000, "volume": 1, "days": 30},
